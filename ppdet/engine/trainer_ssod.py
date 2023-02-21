@@ -15,10 +15,13 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
+from paddle import amp
+import os
+import sys
 import copy
 import time
 import typing
+import math
 import numpy as np
 
 import paddle
@@ -57,16 +60,19 @@ class Trainer_DenseTeacher(Trainer):
         capital_mode = self.mode.capitalize()
         self.dataset = self.cfg['{}Dataset'.format(capital_mode)] = create(
             '{}Dataset'.format(capital_mode))()
-
         if self.mode == 'train':
+            self.burnin_dataset = self.cfg['BurninTrainDataset'] = create(
+                'BurninTrainDataset')
             self.dataset_unlabel = self.cfg['UnsupTrainDataset'] = create(
                 'UnsupTrainDataset')
             self.loader = create('SemiTrainReader')(
                 self.dataset, self.dataset_unlabel, cfg.worker_num)
+            self.burnin_loader = create('TrainReader')(
+                self.burnin_dataset, cfg.worker_num)
 
         # build model
         if 'model' not in self.cfg:
-            self.model = create(cfg.architecture)
+            self.model = create(cfg.SSOD)
         else:
             self.model = self.cfg.model
             self.is_loaded_weights = True
@@ -132,6 +138,7 @@ class Trainer_DenseTeacher(Trainer):
         self.status = {}
 
         self.start_epoch = 0
+        self.start_iter = 0
         self.end_epoch = 0 if 'epoch' not in cfg else cfg.epoch
 
         # initial default callbacks
@@ -141,14 +148,18 @@ class Trainer_DenseTeacher(Trainer):
         self._init_metrics()
         self._reset_metrics()
 
-    def load_weights(self, weights):
+
+
+
+    def load_semi_weights(self, t_weights, s_weights):
         if self.is_loaded_weights:
             return
         self.start_epoch = 0
-        load_pretrain_weight(self.model, weights)
-        load_pretrain_weight(self.ema.model, weights)
-        logger.info("Load weights {} to start training for teacher and student".
-                    format(weights))
+        load_pretrain_weight(self.model.teacher, t_weights)
+        load_pretrain_weight(self.model.student, s_weights)
+        logger.info("Load teacher weights {} to start training".format(t_weights))
+        logger.info("Load student weights {} to start training".format(s_weights))
+
 
     def resume_weights(self, weights, exchange=True):
         # support Distill resume weights
@@ -156,43 +167,52 @@ class Trainer_DenseTeacher(Trainer):
             self.start_epoch = load_weight(self.model.student_model, weights,
                                            self.optimizer, exchange)
         else:
-            self.start_epoch = load_weight(self.model, weights, self.optimizer,
+            self.start_iter,self.start_epoch = load_weight(self.model, weights, self.optimizer,
                                            self.ema
                                            if self.use_ema else None, exchange)
         logger.debug("Resume weights of epoch {}".format(self.start_epoch))
+        logger.debug("Resume weights of iter {}".format(self.start_iter))
 
     def train(self, validate=False):
-        self.semi_start_iters = self.cfg.get('semi_start_iters', 5000)
+        assert self.mode == 'train', "Model not in 'train' mode"
         Init_mark = False
         if validate:
-            self.cfg['EvalDataset'] = self.cfg.EvalDataset = create(
-                "EvalDataset")()
+            self.cfg.EvalDataset = create("EvalDataset")()
 
+        model = self.model
         sync_bn = (getattr(self.cfg, 'norm_type', None) == 'sync_bn' and
                    self.cfg.use_gpu and self._nranks > 1)
         if sync_bn:
-            self.model = paddle.nn.SyncBatchNorm.convert_sync_batchnorm(
-                self.model)
+            # self.model = paddle.nn.SyncBatchNorm.convert_sync_batchnorm(
+            #     self.model)
+            model.teacher = paddle.nn.SyncBatchNorm.convert_sync_batchnorm(
+                model.teacher)
+            model.student = paddle.nn.SyncBatchNorm.convert_sync_batchnorm(
+                self.model.student)
 
+        
         if self.cfg.get('fleet', False):
-            self.model = fleet.distributed_model(self.model)
+            # model = fleet.distributed_model(model)
+            model = fleet.distributed_model(model)
+
             self.optimizer = fleet.distributed_optimizer(self.optimizer)
         elif self._nranks > 1:
             find_unused_parameters = self.cfg[
                 'find_unused_parameters'] if 'find_unused_parameters' in self.cfg else False
-            self.model = paddle.DataParallel(
-                self.model, find_unused_parameters=find_unused_parameters)
-            self.ema.model = paddle.DataParallel(
-                self.ema.model, find_unused_parameters=find_unused_parameters)
+            model = paddle.DataParallel(
+                model, find_unused_parameters=find_unused_parameters)
+
+        if self.cfg.get('amp', False):
+            scaler = amp.GradScaler(
+                enable=self.cfg.use_gpu or self.cfg.use_npu,
+                init_loss_scaling=1024)
 
         self.status.update({
             'epoch_id': self.start_epoch,
-            'step_id': 0,
+            'iter_id': self.start_iter,
+            # 'step_id': self.start_step,
             'steps_per_epoch': len(self.loader),
-            'exchange_save_model': True,
         })
-        # Note: exchange_save_model
-        # in DenseTeacher SSOD, the teacher model will be higher, so exchange when saving pdparams
 
         self.status['batch_time'] = stats.SmoothedValue(
             self.cfg.log_iter, fmt='{avg:.4f}')
@@ -205,14 +225,12 @@ class Trainer_DenseTeacher(Trainer):
                 self.dataset, self.cfg.worker_num)
             self._flops(flops_loader)
         profiler_options = self.cfg.get('profiler_options', None)
+
         self._compose_callback.on_train_begin(self.status)
-
-        train_cfg = self.cfg.DenseTeacher['train_cfg']
-        concat_sup_data = train_cfg.get('concat_sup_data', True)
-
-        for param in self.ema.model.parameters():
-            param.stop_gradient = True
-
+        iter_id = self.start_iter
+        self.status['iter_id'] = iter_id
+        self.status['eval_interval'] = self.cfg.eval_interval
+        self.status['save_interval'] = self.cfg.save_interval
         for epoch_id in range(self.start_epoch, self.cfg.epoch):
             self.status['mode'] = 'train'
             self.status['epoch_id'] = epoch_id
@@ -220,237 +238,127 @@ class Trainer_DenseTeacher(Trainer):
             self.loader.dataset_label.set_epoch(epoch_id)
             self.loader.dataset_unlabel.set_epoch(epoch_id)
             iter_tic = time.time()
-            loss_dict = {
-                'loss': paddle.to_tensor([0]),
-                'loss_sup_sum': paddle.to_tensor([0]),
-                'loss_unsup_sum': paddle.to_tensor([0]),
-                'fg_sum': paddle.to_tensor([0]),
-            }
             if self._nranks > 1:
-                for k in self.model._layers.get_loss_keys():
-                    loss_dict.update({k: paddle.to_tensor([0.])})
-                for k in self.model._layers.get_loss_keys():
-                    loss_dict.update({'distill_' + k: paddle.to_tensor([0.])})
+                # print(model)
+                model._layers.teacher.eval()
+                model._layers.student.train()
             else:
-                for k in self.model.get_loss_keys():
-                    loss_dict.update({k: paddle.to_tensor([0.])})
-                for k in self.model.get_loss_keys():
-                    loss_dict.update({'distill_' + k: paddle.to_tensor([0.])})
-
-            # Note: for step_id, data in enumerate(self.loader): # enumerate bug
+                model.teacher.eval()
+                model.student.train()
+            iter_tic = time.time()
             for step_id in range(len(self.loader)):
                 data = next(self.loader)
 
-                self.model.train()
-                self.ema.model.eval()
+                try:
+                    data_burnin = self.burnin_loader.next()
+                except StopIteration:
+                    self.burnin_loader = iter(self.burnin_loader)
+                    data_burnin = self.burnin_loader.next()
                 data_sup_w, data_sup_s, data_unsup_w, data_unsup_s = data
-
-                self.status['data_time'].update(time.time() - iter_tic)
-                self.status['step_id'] = step_id
-                profiler.add_profiler_step(profiler_options)
-                self._compose_callback.on_step_begin(self.status)
-
-                if data_sup_w['image'].shape != data_sup_s['image'].shape:
-                    data_sup_w, data_sup_s = align_weak_strong_shape(data_sup_w,
-                                                                     data_sup_s)
-
                 data_sup_w['epoch_id'] = epoch_id
                 data_sup_s['epoch_id'] = epoch_id
-                if concat_sup_data:
-                    for k, v in data_sup_s.items():
-                        if k in ['epoch_id']:
-                            continue
-                        data_sup_s[k] = paddle.concat([v, data_sup_w[k]])
-                    loss_dict_sup = self.model(data_sup_s)
+                data_unsup_w['epoch_id'] = epoch_id
+                data_unsup_s['epoch_id'] = epoch_id
+                data=[data_sup_w, data_sup_s, data_unsup_w, data_unsup_s] 
+                iter_id += 1
+                self.status['data_time'].update(time.time() - iter_tic)
+                self.status['step_id'] = step_id
+                self.status['iter_id'] = iter_id
+                data.append(iter_id)
+                data_burnin['iter_id'] = iter_id
+                profiler.add_profiler_step(profiler_options)
+                self._compose_callback.on_step_begin(self.status)
+                if self.cfg.get('amp', False):
+                    with amp.auto_cast(enable=self.cfg.use_gpu):
+                        # model forward
+                        if self._nranks > 1:
+                            outputs = model._layers(data)
+                        else:
+                            outputs = model(data)
+                        loss = outputs['loss']
+
+                    scaled_loss = scaler.scale(loss)
+                    scaled_loss.backward()
+                    scaler.minimize(self.optimizer, scaled_loss)
                 else:
-                    loss_dict_sup_w = self.model(data_sup_w)
-                    loss_dict_sup = self.model(data_sup_s)
-                    for k, v in loss_dict_sup_w.items():
-                        loss_dict_sup[k] = (loss_dict_sup[k] + v) * 0.5
-
-                losses_sup = loss_dict_sup['loss'] * train_cfg['sup_weight']
-                losses_sup.backward()
-
-                losses = losses_sup.detach()
-                loss_dict.update(loss_dict_sup)
-                loss_dict.update({'loss_sup_sum': loss_dict['loss']})
-
-                curr_iter = len(self.loader) * epoch_id + step_id
-                st_iter = self.semi_start_iters
-                if curr_iter == st_iter:
-                    logger.info("***" * 30)
-                    logger.info('Semi starting ...')
-                    logger.info("***" * 30)
-                if curr_iter > st_iter:
-                    unsup_weight = train_cfg['unsup_weight']
-                    if train_cfg['suppress'] == 'linear':
-                        tar_iter = st_iter * 2
-                        if curr_iter <= tar_iter:
-                            unsup_weight *= (curr_iter - st_iter) / st_iter
-                    elif train_cfg['suppress'] == 'exp':
-                        tar_iter = st_iter + 2000
-                        if curr_iter <= tar_iter:
-                            scale = np.exp((curr_iter - tar_iter) / 1000)
-                            unsup_weight *= scale
-                    elif train_cfg['suppress'] == 'step':
-                        tar_iter = st_iter * 2
-                        if curr_iter <= tar_iter:
-                            unsup_weight *= 0.25
-                    else:
-                        raise ValueError
-
-                    if data_unsup_w['image'].shape != data_unsup_s[
-                            'image'].shape:
-                        data_unsup_w, data_unsup_s = align_weak_strong_shape(
-                            data_unsup_w, data_unsup_s)
-
-                    data_unsup_w['epoch_id'] = epoch_id
-                    data_unsup_s['epoch_id'] = epoch_id
-
-                    data_unsup_s['get_data'] = True
-                    student_preds = self.model(data_unsup_s)
-
-                    with paddle.no_grad():
-                        data_unsup_w['is_teacher'] = True
-                        teacher_preds = self.ema.model(data_unsup_w)
-
-                    train_cfg['curr_iter'] = curr_iter
-                    train_cfg['st_iter'] = st_iter
-                    if self._nranks > 1:
-                        loss_dict_unsup = self.model._layers.get_ssod_loss(
-                            student_preds, teacher_preds, train_cfg)
-                    else:
-                        loss_dict_unsup = self.model.get_ssod_loss(
-                            student_preds, teacher_preds, train_cfg)
-
-                    fg_num = loss_dict_unsup["fg_sum"]
-                    del loss_dict_unsup["fg_sum"]
-                    distill_weights = train_cfg['loss_weight']
-                    loss_dict_unsup = {
-                        k: v * distill_weights[k]
-                        for k, v in loss_dict_unsup.items()
-                    }
-
-                    losses_unsup = sum([
-                        metrics_value
-                        for metrics_value in loss_dict_unsup.values()
-                    ]) * unsup_weight
-                    losses_unsup.backward()
-
-                    loss_dict.update(loss_dict_unsup)
-                    loss_dict.update({'loss_unsup_sum': losses_unsup})
-                    losses += losses_unsup.detach()
-                    loss_dict.update({"fg_sum": fg_num})
-                    loss_dict['loss'] = losses
-
-                self.optimizer.step()
+                    if iter_id >=self.cfg.DETR_SSOD['train_cfg']['semi_start_iters']:
+                        outputs = model(data) 
+                    else:   
+                        outputs = model(data_burnin)                 
+                    loss = outputs['loss']
+                    # model backward
+                    loss.backward()
+                    self.optimizer.step()
                 curr_lr = self.optimizer.get_lr()
                 self.lr.step()
+                if self.cfg.get('unstructured_prune'):
+                    self.pruner.step()
                 self.optimizer.clear_grad()
+                # print(outputs)
+                # outputs=reduce_dict(outputs)
+                # if self.model.debug:
+                #     check_gradient(model)
+                # self.check_gradient()
                 self.status['learning_rate'] = curr_lr
                 if self._nranks < 2 or self._local_rank == 0:
-                    self.status['training_staus'].update(loss_dict)
+                    self.status['training_staus'].update(outputs)
 
                 self.status['batch_time'].update(time.time() - iter_tic)
+
+                if validate and (self._nranks < 2 or self._local_rank == 0) and \
+                                ((iter_id + 1) % self.cfg.eval_interval == 0):                    
+                    if not hasattr(self, '_eval_loader'):
+                        # build evaluation dataset and loader
+                        self._eval_dataset = self.cfg.EvalDataset
+                        self._eval_batch_sampler = \
+                            paddle.io.BatchSampler(
+                                self._eval_dataset,
+                                batch_size=self.cfg.EvalReader['batch_size'])
+                        # If metric is VOC, need to be set collate_batch=False.
+                        if self.cfg.metric == 'VOC':
+                            self.cfg['EvalReader']['collate_batch'] = False
+                        self._eval_loader = create('EvalReader')(
+                            self._eval_dataset,
+                            self.cfg.worker_num,
+                            batch_sampler=self._eval_batch_sampler)
+                    # if validation in training is enabled, metrics should be re-init
+                    # Init_mark makes sure this code will only execute once
+                    if validate and Init_mark == False:
+                        Init_mark = True
+                        self._init_metrics(validate=validate)
+                        self._reset_metrics()
+
+                    with paddle.no_grad():
+                        self.status['save_best_model'] = True
+                        self._eval_with_loader(self._eval_loader)
+                    model._layers.student.train()
+
                 self._compose_callback.on_step_end(self.status)
-                # Note: ema_start_iters
-                if self.use_ema and curr_iter == self.ema_start_iters:
-                    logger.info("***" * 30)
-                    logger.info('EMA starting ...')
-                    logger.info("***" * 30)
-                    self.ema.update(self.model, decay=0)
-                elif self.use_ema and curr_iter > self.ema_start_iters:
-                    self.ema.update(self.model)
+
                 iter_tic = time.time()
-
-            is_snapshot = (self._nranks < 2 or self._local_rank == 0) \
-                       and ((epoch_id + 1) % self.cfg.snapshot_epoch == 0 or epoch_id == self.end_epoch - 1)
-            if is_snapshot and self.use_ema:
-                # apply ema weight on model
-                weight = copy.deepcopy(self.ema.model.state_dict())
-                for k, v in weight.items():
-                    if paddle.is_floating_point(v):
-                        weight[k].stop_gradient = True
-                self.status['weight'] = weight
-
+                    
+            if self.cfg.get('unstructured_prune'):
+                self.pruner.update_params()
             self._compose_callback.on_epoch_end(self.status)
 
-            if validate and is_snapshot:
-                if not hasattr(self, '_eval_loader'):
-                    # build evaluation dataset and loader
-                    self._eval_dataset = self.cfg.EvalDataset
-                    self._eval_batch_sampler = \
-                        paddle.io.BatchSampler(
-                            self._eval_dataset,
-                            batch_size=self.cfg.EvalReader['batch_size'])
-                    # If metric is VOC, need to be set collate_batch=False.
-                    if self.cfg.metric == 'VOC':
-                        self.cfg['EvalReader']['collate_batch'] = False
-                    self._eval_loader = create('EvalReader')(
-                        self._eval_dataset,
-                        self.cfg.worker_num,
-                        batch_sampler=self._eval_batch_sampler)
-                # if validation in training is enabled, metrics should be re-init
-                # Init_mark makes sure this code will only execute once
-                if validate and Init_mark == False:
-                    Init_mark = True
-                    self._init_metrics(validate=validate)
-                    self._reset_metrics()
-
-                with paddle.no_grad():
-                    self.status['save_best_model'] = True
-                    self._eval_with_loader(self._eval_loader)
-
-            if is_snapshot and self.use_ema:
-                self.status.pop('weight')
-
         self._compose_callback.on_train_end(self.status)
-
-    def evaluate(self):
-        # get distributed model
-        if self.cfg.get('fleet', False):
-            self.model = fleet.distributed_model(self.model)
-            self.optimizer = fleet.distributed_optimizer(self.optimizer)
-        elif self._nranks > 1:
-            find_unused_parameters = self.cfg[
-                'find_unused_parameters'] if 'find_unused_parameters' in self.cfg else False
-            self.model = paddle.DataParallel(
-                self.model, find_unused_parameters=find_unused_parameters)
-        with paddle.no_grad():
-            self._eval_with_loader(self.loader)
 
     def _eval_with_loader(self, loader):
         sample_num = 0
         tic = time.time()
         self._compose_callback.on_epoch_begin(self.status)
         self.status['mode'] = 'eval'
-
-        test_cfg = self.cfg.DenseTeacher['test_cfg']
-        if test_cfg['inference_on'] == 'teacher':
-            logger.info("***** teacher model evaluating *****")
-            eval_model = self.ema.model
-        else:
-            logger.info("***** student model evaluating *****")
-            eval_model = self.model
-
-        eval_model.eval()
+        self.model.eval()
         if self.cfg.get('print_flops', False):
             flops_loader = create('{}Reader'.format(self.mode.capitalize()))(
                 self.dataset, self.cfg.worker_num, self._eval_batch_sampler)
             self._flops(flops_loader)
+        print("*****teacher evaluate*****")
         for step_id, data in enumerate(loader):
             self.status['step_id'] = step_id
             self._compose_callback.on_step_begin(self.status)
             # forward
-            if self.use_amp:
-                with paddle.amp.auto_cast(
-                        enable=self.cfg.use_gpu or self.cfg.use_mlu,
-                        custom_white_list=self.custom_white_list,
-                        custom_black_list=self.custom_black_list,
-                        level=self.amp_level):
-                    outs = eval_model(data)
-            else:
-                outs = eval_model(data)
+            outs = self.model.teacher(data)
 
             # update metrics
             for metric in self._metrics:
@@ -473,3 +381,37 @@ class Trainer_DenseTeacher(Trainer):
         self._compose_callback.on_epoch_end(self.status)
         # reset metric states for metric may performed multiple times
         self._reset_metrics()
+
+        print("*****student evaluate*****")
+        for step_id, data in enumerate(loader):
+            self.status['step_id'] = step_id
+            self._compose_callback.on_step_begin(self.status)
+            # forward
+            outs = self.model.student(data)
+
+            # update metrics
+            for metric in self._metrics:
+                metric.update(data, outs)
+
+            # multi-scale inputs: all inputs have same im_id
+            if isinstance(data, typing.Sequence):
+                sample_num += data[0]['im_id'].numpy().shape[0]
+            else:
+                sample_num += data['im_id'].numpy().shape[0]
+            self._compose_callback.on_step_end(self.status)
+
+        self.status['sample_num'] = sample_num
+        self.status['cost_time'] = time.time() - tic
+
+        # accumulate metric to log out
+        for metric in self._metrics:
+            metric.accumulate()
+            metric.log()
+        # reset metric states for metric may performed multiple times
+        self._reset_metrics()
+        self.status['mode'] = 'train'
+
+    def evaluate(self):
+        with paddle.no_grad():
+            self._eval_with_loader(self.loader)
+

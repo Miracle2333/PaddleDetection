@@ -266,6 +266,12 @@ class DETRLoss(nn.Layer):
             gt_mask (List(Tensor), optional): list[[n, H, W]]
             postfix (str): postfix of loss name
         """
+        for i,gt in enumerate(zip(gt_bbox,gt_class)):
+            bbox,cls=gt
+            if bbox.sum()==0:
+               gt_bbox[i]=paddle.zeros([0,4]) 
+               gt_class[i]=paddle.zeros([0,1])
+
         dn_match_indices = kwargs.get("dn_match_indices", None)
         if dn_match_indices is None and (boxes is not None and
                                          logits is not None):

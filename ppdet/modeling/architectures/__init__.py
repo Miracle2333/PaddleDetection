@@ -41,7 +41,8 @@ from . import yolof
 from . import pose3d_metro
 from . import centertrack
 from . import queryinst
-
+from . import detr_ssod
+from . import multi_stream_detector
 from .meta_arch import *
 from .faster_rcnn import *
 from .mask_rcnn import *
@@ -72,3 +73,5 @@ from .yolof import *
 from .pose3d_metro import *
 from .centertrack import *
 from .queryinst import *
+from .detr_ssod import *
+from .multi_stream_detector import *

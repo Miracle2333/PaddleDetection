@@ -4,9 +4,10 @@ norm_type: sync_bn
 use_ema: True
 ema_decay: 0.9999
 ema_decay_type: "exponential"
+
 hidden_dim: 256
 use_focal_loss: True
-
+architecture: DETR
 
 DETR:
   backbone: ResNet

@@ -36,6 +36,7 @@ class DETR(BaseArch):
                  detr_head='DETRHead',
                  neck=None,
                  post_process='DETRBBoxPostProcess',
+                 post_process_semi='DETRBBoxSemiPostProcess',
                  exclude_post_process=False):
         super(DETR, self).__init__()
         self.backbone = backbone
@@ -44,6 +45,7 @@ class DETR(BaseArch):
         self.neck = neck
         self.post_process = post_process
         self.exclude_post_process = exclude_post_process
+        self.post_process_semi= post_process_semi
 
     @classmethod
     def from_config(cls, cfg, *args, **kwargs):
