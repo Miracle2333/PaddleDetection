@@ -17,7 +17,7 @@ from __future__ import division
 from __future__ import print_function
 from typing import KeysView
 import copy
-from ppdet.core.workspace import register, create
+from ppdet.core.workspace import register, create, merge_config
 from .meta_arch import BaseArch
 from ppdet.data.reader import transform
 import paddle
@@ -35,14 +35,14 @@ from ppdet.core.workspace import register, create
 from ppdet.modeling.bbox_utils import delta2bbox
 from ppdet.data.transform.atss_assigner import bbox_overlaps
 from ppdet.utils.logger import setup_logger
-from ppdet.modeling.ssod.utils import filter_invalid,weighted_loss
+from ppdet.modeling.ssod.utils import filter_invalid, weighted_loss
 from .multi_stream_detector import MultiSteamDetector
 logger = setup_logger(__name__)
 
 __all__ = ['DETR_SSOD']
 @register
 class DETR_SSOD(MultiSteamDetector):
-    def __init__(self, teacher, student, train_cfg=None, test_cfg=None):
+    def __init__(self, teacher, student, train_cfg=None, test_cfg=None, PPDETRTransformer=None):
         super(DETR_SSOD, self).__init__(
             dict(teacher=teacher, student=student),
             train_cfg=train_cfg,
@@ -57,18 +57,22 @@ class DETR_SSOD(MultiSteamDetector):
             self.sup_weight = self.train_cfg['sup_weight']
             self._teacher = None
             self._student = None
+            self._transformer = None
 
     @classmethod
-    def from_config(cls, cfg, *args, **kwargs):
+    def from_config(cls, cfg):
         teacher = create(cfg['teacher'])
+        merge_config(cfg)
         student = create(cfg['student'])
         train_cfg = cfg['train_cfg']
         test_cfg = cfg['test_cfg']
+        PPDETRTransformer = cfg['PPDETRTransformer']
         return {
             'teacher': teacher,
             'student': student,
             'train_cfg': train_cfg,
-            'test_cfg' : test_cfg
+            'test_cfg' : test_cfg,
+            'PPDETRTransformer': PPDETRTransformer
         }
 
     def forward_train(self, inputs, **kwargs):

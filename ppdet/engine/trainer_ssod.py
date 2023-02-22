@@ -148,9 +148,6 @@ class Trainer_DenseTeacher(Trainer):
         self._init_metrics()
         self._reset_metrics()
 
-
-
-
     def load_semi_weights(self, t_weights, s_weights):
         if self.is_loaded_weights:
             return
@@ -159,7 +156,17 @@ class Trainer_DenseTeacher(Trainer):
         load_pretrain_weight(self.model.student, s_weights)
         logger.info("Load teacher weights {} to start training".format(t_weights))
         logger.info("Load student weights {} to start training".format(s_weights))
-
+    
+    def load_weights(self, weights):
+        if self.is_loaded_weights:
+            return
+        t_weights = weights
+        s_weights = weights
+        self.start_epoch = 0
+        load_pretrain_weight(self.model.teacher, t_weights)
+        load_pretrain_weight(self.model.student, s_weights)
+        logger.info("Load teacher weights {} to start training".format(t_weights))
+        logger.info("Load student weights {} to start training".format(s_weights))
 
     def resume_weights(self, weights, exchange=True):
         # support Distill resume weights
