@@ -148,8 +148,9 @@ class TransformerDecoder(nn.Layer):
         output = tgt
         dec_out_bboxes = []
         dec_out_logits = []
+        ref_points = F.sigmoid(ref_points_unact)
         for i, layer in enumerate(self.layers):
-            ref_points_input = F.sigmoid(ref_points_unact).detach().unsqueeze(2)
+            ref_points_input = ref_points.detach().unsqueeze(2)
             query_pos_embed = get_sine_pos_embed(ref_points_input[..., 0, :],
                                                  self.hidden_dim // 2)
             query_pos_embed = query_pos_head(query_pos_embed)
@@ -158,21 +159,23 @@ class TransformerDecoder(nn.Layer):
                            memory_spatial_shapes, memory_level_start_index,
                            attn_mask, memory_mask, query_pos_embed)
 
-            inter_ref_bbox = bbox_head[i](output) + ref_points_unact.detach()
+            inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
+                ref_points).detach())
 
             if self.training:
                 dec_out_logits.append(score_head[i](output))
                 if i == 0:
-                    dec_out_bboxes.append(F.sigmoid(inter_ref_bbox))
+                    dec_out_bboxes.append(inter_ref_bbox)
                 else:
                     dec_out_bboxes.append(
-                        F.sigmoid(bbox_head[i](output) + ref_points_unact))
+                        F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
+                            ref_points)))
             else:
                 if i == len(self.layers) - 1:
-                    dec_out_bboxes.append(F.sigmoid(inter_ref_bbox))
+                    dec_out_bboxes.append(inter_ref_bbox)
                     dec_out_logits.append(score_head[i](output))
 
-            ref_points_unact = inter_ref_bbox
+            ref_points = inter_ref_bbox
 
         return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits)
 
@@ -297,7 +300,7 @@ class PPDETRTransformer(nn.Layer):
 
     @classmethod
     def from_config(cls, cfg, input_shape):
-        return {'backbone_feat_channels': [i.channels for i in input_shape], }
+        return {'backbone_feat_channels': [i.channels for i in input_shape]}
 
     def _build_input_proj_layer(self, backbone_feat_channels):
         self.input_proj = nn.LayerList()

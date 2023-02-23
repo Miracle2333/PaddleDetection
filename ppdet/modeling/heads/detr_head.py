@@ -54,7 +54,6 @@ class MLP(nn.Layer):
 class MultiHeadAttentionMap(nn.Layer):
     """This code is based on
         https://github.com/facebookresearch/detr/blob/main/models/segmentation.py
-
         This is a 2D attention module, which only returns the attention softmax (no multiplication by value)
     """
 
@@ -104,7 +103,6 @@ class MultiHeadAttentionMap(nn.Layer):
 class MaskHeadFPNConv(nn.Layer):
     """This code is based on
         https://github.com/facebookresearch/detr/blob/main/models/segmentation.py
-
         Simple convolutional head, using group norm.
         Upsampling is done using a FPN approach
     """

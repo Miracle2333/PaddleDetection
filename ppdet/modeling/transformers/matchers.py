@@ -64,7 +64,6 @@ class HungarianMatcher(nn.Layer):
             logits (Tensor): [b, query, num_classes]
             gt_bbox (List(Tensor)): list[[n, 4]]
             gt_class (List(Tensor)): list[[n, 1]]
-
         Returns:
             A list of size batch_size, containing tuples of (index_i, index_j) where:
                 - index_i is the indices of the selected predictions (in order)

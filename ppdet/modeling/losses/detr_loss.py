@@ -45,7 +45,9 @@ class DETRLoss(nn.Layer):
                  },
                  aux_loss=True,
                  use_focal_loss=False,
-                 use_vfl=False):
+                 use_vfl=False,
+                 use_same_match=False,
+                 same_match_ind=0):
         r"""
         Args:
             num_classes (int): The number of classes.
@@ -63,6 +65,8 @@ class DETRLoss(nn.Layer):
         self.aux_loss = aux_loss
         self.use_focal_loss = use_focal_loss
         self.use_vfl = use_vfl
+        self.use_same_match = use_same_match
+        self.same_match_ind = same_match_ind
 
         if not self.use_focal_loss:
             self.loss_coeff['class'] = paddle.full([num_classes + 1],
@@ -190,12 +194,16 @@ class DETRLoss(nn.Layer):
         loss_class = []
         loss_bbox = []
         loss_giou = []
+        if dn_match_indices is not None:
+            match_indices = dn_match_indices
+        elif self.use_same_match:
+            match_indices = self.matcher(boxes[self.same_match_ind],
+                                         logits[self.same_match_ind], gt_bbox,
+                                         gt_class)
         for aux_boxes, aux_logits in zip(boxes, logits):
-            if dn_match_indices is None:
+            if not self.use_same_match and dn_match_indices is None:
                 match_indices = self.matcher(aux_boxes, aux_logits, gt_bbox,
                                              gt_class)
-            else:
-                match_indices = dn_match_indices
             if self.use_vfl:
                 if sum(len(a) for a in gt_bbox) > 0:
                     src_bbox, target_bbox = self._get_src_target_assign(
@@ -266,12 +274,6 @@ class DETRLoss(nn.Layer):
             gt_mask (List(Tensor), optional): list[[n, H, W]]
             postfix (str): postfix of loss name
         """
-        for i,gt in enumerate(zip(gt_bbox,gt_class)):
-            bbox,cls=gt
-            if bbox.sum()==0:
-               gt_bbox[i]=paddle.zeros([0,4]) 
-               gt_class[i]=paddle.zeros([0,1])
-
         dn_match_indices = kwargs.get("dn_match_indices", None)
         if dn_match_indices is None and (boxes is not None and
                                          logits is not None):

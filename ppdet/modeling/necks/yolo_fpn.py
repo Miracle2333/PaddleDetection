@@ -58,7 +58,6 @@ class YoloDetBlock(nn.Layer):
                  data_format='NCHW'):
         """
         YOLODetBlock layer for yolov3, see https://arxiv.org/abs/1804.02767
-
         Args:
             ch_in (int): input channel
             channel (int): base channel
@@ -124,7 +123,6 @@ class SPP(nn.Layer):
                  data_format='NCHW'):
         """
         SPP layer, which consist of four pooling layer follwed by conv layer
-
         Args:
             ch_in (int): input channel of conv layer
             ch_out (int): output channel of conv layer
@@ -184,7 +182,6 @@ class CoordConv(nn.Layer):
                  data_format='NCHW'):
         """
         CoordConv layer, see https://arxiv.org/abs/1807.03247
-
         Args:
             ch_in (int): input channel
             ch_out (int): output channel
@@ -193,7 +190,6 @@ class CoordConv(nn.Layer):
             norm_type (str): batch norm type, default bn
             name (str): layer name
             data_format (str): data format, NCHW or NHWC
-
         """
         super(CoordConv, self).__init__()
         self.conv = ConvBNLayer(
@@ -221,7 +217,6 @@ class PPYOLODetBlock(nn.Layer):
     def __init__(self, cfg, name, data_format='NCHW'):
         """
         PPYOLODetBlock layer
-
         Args:
             cfg (list): layer configs for this block
             name (str): block name
@@ -326,7 +321,6 @@ class PPYOLODetBlockCSP(nn.Layer):
                  data_format='NCHW'):
         """
         PPYOLODetBlockCSP layer
-
         Args:
             cfg (list): layer configs for this block
             ch_in (int): input channel
@@ -394,12 +388,10 @@ class YOLOv3FPN(nn.Layer):
                  data_format='NCHW'):
         """
         YOLOv3FPN layer
-
         Args:
             in_channels (list): input channels for fpn
             norm_type (str): batch norm type, default bn
             data_format (str): data format, NCHW or NHWC
-
         """
         super(YOLOv3FPN, self).__init__()
         assert len(in_channels) > 0, "in_channels length should > 0"
@@ -503,7 +495,6 @@ class PPYOLOFPN(nn.Layer):
                  spp=False):
         """
         PPYOLOFPN layer
-
         Args:
             in_channels (list): input channels for fpn
             norm_type (str): batch norm type, default bn
@@ -514,7 +505,6 @@ class PPYOLOFPN(nn.Layer):
             block_size (int): block size of DropBlock
             keep_prob (float): keep probability of DropBlock
             spp (bool): whether use spp or not
-
         """
         super(PPYOLOFPN, self).__init__()
         assert len(in_channels) > 0, "in_channels length should > 0"
@@ -803,7 +793,6 @@ class PPYOLOPAN(nn.Layer):
                  spp=False):
         """
         PPYOLOPAN layer with SPP, DropBlock and CSP connection.
-
         Args:
             in_channels (list): input channels for fpn
             norm_type (str): batch norm type, default bn
@@ -814,7 +803,6 @@ class PPYOLOPAN(nn.Layer):
             block_size (int): block size of DropBlock
             keep_prob (float): keep probability of DropBlock
             spp (bool): whether use spp or not
-
         """
         super(PPYOLOPAN, self).__init__()
         assert len(in_channels) > 0, "in_channels length should > 0"
@@ -1017,7 +1005,8 @@ class YOLOCSPPAN(nn.Layer):
                  data_format='NCHW',
                  act='silu',
                  trt=False,
-                 eval_size=[640, 640]):
+                 eval_size=[640, 640],
+                 proj_use_conv=False):
         super(YOLOCSPPAN, self).__init__()
         self.proj_dim = proj_dim
         self.eval_size = eval_size
@@ -1027,9 +1016,14 @@ class YOLOCSPPAN(nn.Layer):
             # proj channels
             self.neck_input_proj = nn.LayerList()
             for idx in range(len(in_channels)):
-                self.neck_input_proj.append(
-                    BaseConv(
-                        int(in_channels[idx]), proj_dim[idx], 1, 1, act=act))
+                if proj_use_conv:
+                    self.neck_input_proj.append(
+                        nn.Conv2D(int(in_channels[idx]), proj_dim[idx], 1, 1))
+                else:
+                    self.neck_input_proj.append(
+                        BaseConv(
+                            int(in_channels[idx]), proj_dim[idx], 1, 1,
+                            act=act))
             in_channels = proj_dim
         self.in_channels = in_channels
         self._out_channels = in_channels

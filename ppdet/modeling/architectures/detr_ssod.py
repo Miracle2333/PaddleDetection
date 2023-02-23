@@ -104,7 +104,7 @@ class DETR_SSOD(MultiSteamDetector):
                 pad_img_af=[]
                 for img, pad_img,m in zip(data_list, tensor,mask):
                     pad_img[:, : img['image'].shape[2], : img['image'].shape[3]]=paddle.clone(img['image'].squeeze(0))
-                    m[: img['image'].shape[2], :img['image'].shape[3]] = paddle.to_tensor(1.0)
+                    m[: img['image'].shape[2], :img['image'].shape[3]] = img['pad_mask']
                     pad_img_af.append(pad_img)
                     mask_af.append(m)
                 mask_af=paddle.stack(mask_af,axis=0)
@@ -193,118 +193,6 @@ class DETR_SSOD(MultiSteamDetector):
         )
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
-        max_pixels=1000
-        for i in range(data_unsup_s['image'].shape[0]):
-            cur_boxes = teacher_bboxes[i]
-            if teacher_bboxes[i].sum()==0:
-                teacher_bboxes[i]=paddle.zeros([1,4])
-            
-            else:
-                cur_one_tensor = paddle.to_tensor([1.0, 0.0, 0.0, 0.0])
-                cur_one_tensor = cur_one_tensor
-                cur_one_tensor = cur_one_tensor.tile([teacher_bboxes[i].shape[0], 1])
-                if 'flipped' in teacher_data.keys() and teacher_data['flipped']:
-                    original_boxes = paddle.abs(cur_one_tensor - teacher_bboxes[i])
-
-                else:
-                    original_boxes = teacher_bboxes[i]
-
-                # if 'filpped' in records_unlabel_q.keys() and records_unlabel_q['filpped']:
-                #     cur_boxes = cur_boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]).cuda() + torch.as_tensor([img_w, 0, img_w, 0]).cuda()
-
-                original_boxes = box_cxcywh_to_xyxy(original_boxes)
-                img_w = teacher_data['OriginalImageSize'][i][1]
-                img_h = teacher_data['OriginalImageSize'][i][0]
-                scale_fct = paddle.to_tensor([img_w, img_h, img_w, img_h])
-                original_boxes = original_boxes * scale_fct
-                cur_boxes = paddle.clone(original_boxes)
-                cur_labels = paddle.clone(teacher_labels[i])
-                if 'flipped' in  data_unsup_s.keys() and  data_unsup_s['flipped']:
-                   cur_boxes = paddle.index_select(x=cur_boxes, index=paddle.to_tensor([2,1,0,3]), axis=1) * paddle.to_tensor([-1, 1, -1, 1]) + paddle.to_tensor([img_w, 0, img_w, 0])
-  
-                if data_unsup_s['RandomResize_times'][i] > 1:
-                    rescaled_size1 = data_unsup_s['RandomResize_scale'][i][0]
-                    
-                    rescaled_size1 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size1)
-                    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size1, (img_w, img_h)))
-                    ratio_width, ratio_height = ratios
-                    cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
-                    img_w = rescaled_size1[0]
-                    img_h = rescaled_size1[1]
-
-                
-                    region = data_unsup_s['RandomSizeCrop'][i]
-                    i1, j1, h, w = region
-                    fields = ["labels", "area", "iscrowd"]
-                    max_size = paddle.to_tensor([w, h], dtype='float32')
-                    cropped_boxes = cur_boxes - paddle.to_tensor([j1, i1, j1, i1])
-                    cropped_boxes = paddle.minimum(cropped_boxes.reshape([-1, 2, 2]), max_size)
-                    cropped_boxes = cropped_boxes.clip(min=0)
-                    area = (cropped_boxes[:, 1, :] - cropped_boxes[:, 0, :]).prod(axis=1)
-                    cur_boxes = cropped_boxes.reshape([-1, 4])
-                    fields.append("boxes")
-                    cropped_boxes = paddle.clone(cur_boxes)
-                    cropped_boxes = cropped_boxes.reshape([-1, 2, 2])
-                    keep = paddle.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], axis=1)
-                    cur_boxes = cur_boxes[keep]
-                    cur_labels = cur_labels[keep]
-                    img_w = w
-                    img_h = h
-                    # random resize
-                    rescaled_size2 = data_unsup_s['RandomResize_scale'][i][1]
-                    rescaled_size2 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size2, max_size=max_pixels)
-                    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size2, (img_w, img_h)))
-                    ratio_width, ratio_height = ratios
-                    cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
-                    img_w = rescaled_size2[0]
-                    img_h = rescaled_size2[1]
-                else:
-                    # random resize
-                    rescaled_size1 = data_unsup_s['RandomResize_scale'][i][0]
-                    rescaled_size1 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size1, max_size=max_pixels)
-                    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size1, (img_w, img_h)))
-                    ratio_width, ratio_height = ratios
-                    cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
-                    img_w = rescaled_size1[0]
-                    img_h = rescaled_size1[1]
-
-                # finally, deal with normalize part in deformable detr aug code
-                cur_boxes = box_xyxy_to_cxcywh(cur_boxes)
-                cur_boxes = cur_boxes / paddle.to_tensor([img_w, img_h, img_w, img_h], dtype=paddle.float32)   
-
-            if 'RandomErasing' in data_unsup_s.keys():
-                region = data_unsup_s['RandomErasing'][0]
-                i, j, h, w, _ = region
-                cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
-                i = i / img_h
-                j = j / img_w
-                h = h / img_h
-                w = w / img_w
-                keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
-                cur_boxes = cur_boxes[keep]
-                cur_labels = cur_labels[keep]
-                region = data_unsup_s['RandomErasing'][1]
-                i, j, h, w, _ = region
-                cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
-                i = i / img_h
-                j = j / img_w
-                h = h / img_h
-                w = w / img_w
-                keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
-                cur_boxes = cur_boxes[keep]
-                cur_labels = cur_labels[keep]
-                region = data_unsup_s['RandomErasing'][2]
-                i, j, h, w, _ = region
-                cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
-                i = i / img_h
-                j = j / img_w
-                h = h / img_h
-                w = w / img_w
-                keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
-                cur_boxes = cur_boxes[keep]
-                cur_labels = cur_labels[keep]
-            teacher_bboxes[i]=cur_boxes
-        
         teacher_info=[teacher_bboxes,teacher_labels]
         student_info=student_data
 
@@ -319,8 +207,8 @@ class DETR_SSOD(MultiSteamDetector):
         losses = dict()
         for i in range(len(pseudo_bboxes)):
             if pseudo_labels[i].shape[0]==0:
-                pseudo_bboxes[i]=paddle.zeros([1,4]).numpy()
-                pseudo_labels[i]=paddle.zeros([1,1]).numpy()
+                pseudo_bboxes[i]=paddle.zeros([0,4]).numpy()
+                pseudo_labels[i]=paddle.zeros([0,1]).numpy()
             else:
                 pseudo_bboxes[i]=pseudo_bboxes[i][:,:4].numpy()
                 pseudo_labels[i]=pseudo_labels[i].unsqueeze(-1).numpy()
@@ -335,7 +223,7 @@ class DETR_SSOD(MultiSteamDetector):
         if self.student.neck is not None:
                 body_feats = self.student.neck(body_feats)
         pad_mask = student_data['pad_mask'] if self.training else None
-        out_transformer = self.student.transformer(body_feats, pad_mask)
+        out_transformer = self.student.transformer(body_feats, pad_mask,student_data)
         losses = self.student.detr_head(out_transformer, body_feats, student_data)
 
             # losses['loss'] = paddle.zeros([1], dtype='float32')
@@ -413,3 +301,126 @@ def _max_by_axis(the_list):
         for index, item in enumerate(sublist):
             maxes[index] = max(maxes[index], item)
     return maxes
+
+
+
+
+
+
+
+
+
+
+
+
+        # for i in range(data_unsup_s['image'].shape[0]):
+        #     cur_boxes = teacher_bboxes[i]
+        #     if teacher_bboxes[i].sum()==0:
+        #         teacher_bboxes[i]=paddle.zeros([1,4])
+            
+        #     else:
+        #         cur_one_tensor = paddle.to_tensor([1.0, 0.0, 0.0, 0.0])
+        #         cur_one_tensor = cur_one_tensor
+        #         cur_one_tensor = cur_one_tensor.tile([teacher_bboxes[i].shape[0], 1])
+        #         if 'flipped' in teacher_data.keys() and teacher_data['flipped']:
+        #             original_boxes = paddle.abs(cur_one_tensor - teacher_bboxes[i])
+
+        #         else:
+        #             original_boxes = teacher_bboxes[i]
+
+        #         # if 'filpped' in records_unlabel_q.keys() and records_unlabel_q['filpped']:
+        #         #     cur_boxes = cur_boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]).cuda() + torch.as_tensor([img_w, 0, img_w, 0]).cuda()
+
+        #         original_boxes = box_cxcywh_to_xyxy(original_boxes)
+        #         img_w = teacher_data['OriginalImageSize'][i][1]
+        #         img_h = teacher_data['OriginalImageSize'][i][0]
+        #         scale_fct = paddle.to_tensor([img_w, img_h, img_w, img_h])
+        #         original_boxes = original_boxes * scale_fct
+        #         cur_boxes = paddle.clone(original_boxes)
+        #         cur_labels = paddle.clone(teacher_labels[i])
+        #         if 'flipped' in  data_unsup_s.keys() and  data_unsup_s['flipped']:
+        #            cur_boxes = paddle.index_select(x=cur_boxes, index=paddle.to_tensor([2,1,0,3]), axis=1) * paddle.to_tensor([-1, 1, -1, 1]) + paddle.to_tensor([img_w, 0, img_w, 0])
+  
+        #         if data_unsup_s['RandomResize_times'][i] > 1:
+        #             rescaled_size1 = data_unsup_s['RandomResize_scale'][i][0]
+                    
+        #             rescaled_size1 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size1)
+        #             ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size1, (img_w, img_h)))
+        #             ratio_width, ratio_height = ratios
+        #             cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+        #             img_w = rescaled_size1[0]
+        #             img_h = rescaled_size1[1]
+
+                
+        #             region = data_unsup_s['RandomSizeCrop'][i]
+        #             i1, j1, h, w = region
+        #             fields = ["labels", "area", "iscrowd"]
+        #             max_size = paddle.to_tensor([w, h], dtype='float32')
+        #             cropped_boxes = cur_boxes - paddle.to_tensor([j1, i1, j1, i1])
+        #             cropped_boxes = paddle.minimum(cropped_boxes.reshape([-1, 2, 2]), max_size)
+        #             cropped_boxes = cropped_boxes.clip(min=0)
+        #             area = (cropped_boxes[:, 1, :] - cropped_boxes[:, 0, :]).prod(axis=1)
+        #             cur_boxes = cropped_boxes.reshape([-1, 4])
+        #             fields.append("boxes")
+        #             cropped_boxes = paddle.clone(cur_boxes)
+        #             cropped_boxes = cropped_boxes.reshape([-1, 2, 2])
+        #             keep = paddle.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], axis=1)
+        #             cur_boxes = cur_boxes[keep]
+        #             cur_labels = cur_labels[keep]
+        #             img_w = w
+        #             img_h = h
+        #             # random resize
+        #             rescaled_size2 = data_unsup_s['RandomResize_scale'][i][1]
+        #             rescaled_size2 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size2, max_size=max_pixels)
+        #             ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size2, (img_w, img_h)))
+        #             ratio_width, ratio_height = ratios
+        #             cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+        #             img_w = rescaled_size2[0]
+        #             img_h = rescaled_size2[1]
+        #         else:
+        #             # random resize
+        #             rescaled_size1 = data_unsup_s['RandomResize_scale'][i][0]
+        #             rescaled_size1 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size1, max_size=max_pixels)
+        #             ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size1, (img_w, img_h)))
+        #             ratio_width, ratio_height = ratios
+        #             cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+        #             img_w = rescaled_size1[0]
+        #             img_h = rescaled_size1[1]
+
+        #         # finally, deal with normalize part in deformable detr aug code
+        #         cur_boxes = box_xyxy_to_cxcywh(cur_boxes)
+        #         cur_boxes = cur_boxes / paddle.to_tensor([img_w, img_h, img_w, img_h], dtype=paddle.float32)   
+
+        #     if 'RandomErasing' in data_unsup_s.keys():
+        #         region = data_unsup_s['RandomErasing'][0]
+        #         i, j, h, w, _ = region
+        #         cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
+        #         i = i / img_h
+        #         j = j / img_w
+        #         h = h / img_h
+        #         w = w / img_w
+        #         keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
+        #         cur_boxes = cur_boxes[keep]
+        #         cur_labels = cur_labels[keep]
+        #         region = data_unsup_s['RandomErasing'][1]
+        #         i, j, h, w, _ = region
+        #         cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
+        #         i = i / img_h
+        #         j = j / img_w
+        #         h = h / img_h
+        #         w = w / img_w
+        #         keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
+        #         cur_boxes = cur_boxes[keep]
+        #         cur_labels = cur_labels[keep]
+        #         region = data_unsup_s['RandomErasing'][2]
+        #         i, j, h, w, _ = region
+        #         cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
+        #         i = i / img_h
+        #         j = j / img_w
+        #         h = h / img_h
+        #         w = w / img_w
+        #         keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
+        #         cur_boxes = cur_boxes[keep]
+        #         cur_labels = cur_labels[keep]
+        #     teacher_bboxes[i]=cur_boxes
+        

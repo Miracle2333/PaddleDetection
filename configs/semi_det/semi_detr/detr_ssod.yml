@@ -148,8 +148,8 @@ DETRLoss:
 HungarianMatcher:
   matcher_coeff: {class: 2, bbox: 5, giou: 2}
 
-pretrain_student_weights: https://paddledet.bj.bcebos.com/models/deformable_detr_r50_1x_coco.pdparams
-pretrain_teacher_weights: https://paddledet.bj.bcebos.com/models/deformable_detr_r50_1x_coco.pdparams
+pretrain_student_weights: model_final-0.pdparams
+pretrain_teacher_weights: model_final-0.pdparams
 
 SSOD: DETR_SSOD
 DETR_SSOD:
