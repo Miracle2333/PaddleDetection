@@ -129,8 +129,10 @@ def get_contrastive_denoising_training_group(targets,
                                              num_denoising=100,
                                              label_noise_ratio=0.5,
                                              box_noise_scale=1.0):
-    if num_denoising <= 0:
+    if num_denoising <= 0 or targets is None:
         return None, None, None, None
+
+    #gt none bug
     num_gts = [len(t) for t in targets["gt_class"]]
     max_gt_num = max(num_gts)
     if max_gt_num == 0:

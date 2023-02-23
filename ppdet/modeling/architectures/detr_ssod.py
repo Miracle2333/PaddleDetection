@@ -1,4 +1,4 @@
-# Copyright (c) 2022 PaddlePaddle Authors. All Rights Reserved. 
+ppdet/modeling/architectures/detr_ssod.py# Copyright (c) 2022 PaddlePaddle Authors. All Rights Reserved. 
 #   
 # Licensed under the Apache License, Version 2.0 (the "License");   
 # you may not use this file except in compliance with the License.  
@@ -141,16 +141,18 @@ class DETR_SSOD(MultiSteamDetector):
 
         return loss
 
-    def foward_unsup_train(self, teacher_data, student_data,data_unsup_s):
+    def foward_unsup_train(self, teacher_data, student_data, data_unsup_s):
 
         with paddle.no_grad():
-           body_feats=self.teacher.backbone(teacher_data)
-           pad_mask = teacher_data['pad_mask'] if self.training else None
-           out_transformer = self.teacher.transformer(body_feats, pad_mask, teacher_data)
-           preds = self.teacher.detr_head(out_transformer, body_feats)
+            body_feats=self.teacher.backbone(teacher_data)
+            if self.teacher.neck is not None:
+                body_feats = self.teacher.neck(body_feats)
+            pad_mask = teacher_data['pad_mask'] if self.training else None
+            out_transformer = self.teacher.transformer(body_feats, pad_mask, teacher_data)
+            preds = self.teacher.detr_head(out_transformer, body_feats)
         #    bbox, bbox_num = self.teacher.post_process(
         #             preds, teacher_data['im_shape'], paddle.ones_like(teacher_data['scale_factor']))
-           bbox, bbox_num = self.teacher.post_process_semi(preds)
+            bbox, bbox_num = self.teacher.post_process_semi(preds)
         self.place=body_feats[0].place
 
         if bbox.numel() > 0:
@@ -193,6 +195,7 @@ class DETR_SSOD(MultiSteamDetector):
         teacher_labels = proposal_label_list
         max_pixels=1000
         for i in range(data_unsup_s['image'].shape[0]):
+            cur_boxes = teacher_bboxes[i]
             if teacher_bboxes[i].sum()==0:
                 teacher_bboxes[i]=paddle.zeros([1,4])
             
@@ -216,7 +219,7 @@ class DETR_SSOD(MultiSteamDetector):
                 original_boxes = original_boxes * scale_fct
                 cur_boxes = paddle.clone(original_boxes)
                 cur_labels = paddle.clone(teacher_labels[i])
-                if 'filpped' in  data_unsup_s.keys() and  data_unsup_s['flipped']:
+                if 'flipped' in  data_unsup_s.keys() and  data_unsup_s['flipped']:
                    cur_boxes = paddle.index_select(x=cur_boxes, index=paddle.to_tensor([2,1,0,3]), axis=1) * paddle.to_tensor([-1, 1, -1, 1]) + paddle.to_tensor([img_w, 0, img_w, 0])
   
                 if data_unsup_s['RandomResize_times'][i] > 1:
@@ -300,7 +303,7 @@ class DETR_SSOD(MultiSteamDetector):
                 keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
                 cur_boxes = cur_boxes[keep]
                 cur_labels = cur_labels[keep]
-        teacher_bboxes[i]=cur_boxes
+            teacher_bboxes[i]=cur_boxes
         
         teacher_info=[teacher_bboxes,teacher_labels]
         student_info=student_data
@@ -329,6 +332,8 @@ class DETR_SSOD(MultiSteamDetector):
         student_data['gt_class'].extend(pseudo_labels)
         # student_data.update(gt_bbox=pseudo_bboxes,gt_class=pseudo_labels)
         body_feats=self.student.backbone(student_data)
+        if self.student.neck is not None:
+                body_feats = self.student.neck(body_feats)
         pad_mask = student_data['pad_mask'] if self.training else None
         out_transformer = self.student.transformer(body_feats, pad_mask)
         losses = self.student.detr_head(out_transformer, body_feats, student_data)

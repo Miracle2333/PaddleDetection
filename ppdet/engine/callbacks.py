@@ -666,6 +666,7 @@ class SemiCheckpointer(Checkpointer):
                     epoch_id + 1,
                     iter_id + 1
                 )
+
     def on_epoch_end(self, status):
         # Checkpointer only performed during training
         mode = status['mode']
@@ -709,3 +710,4 @@ class SemiCheckpointer(Checkpointer):
                             epoch_id + 1,
                             iter_id + 1
                         )
+                        
