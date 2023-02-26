@@ -4,10 +4,9 @@ norm_type: sync_bn
 use_ema: True
 ema_decay: 0.9999
 ema_decay_type: "exponential"
-
 hidden_dim: 256
 use_focal_loss: True
-architecture: DETR
+
 
 DETR:
   backbone: ResNet
@@ -32,18 +31,19 @@ YOLOCSPPAN:
   use_trans: True
   nhead: 8
   num_layers: 2
-  dim_feedforward: 2048
+  dim_feedforward: 1024
   dropout: 0.1
   activation: 'gelu'
-  proj_dim: [512, 512, 512]
+  proj_dim: [256, 256, 256]
+  proj_use_conv: True
 
 PPDETRTransformer:
   num_queries: 300
   position_embed_type: sine
-  num_levels: 4
+  num_levels: 3
   nhead: 8
   num_decoder_layers: 6
-  dim_feedforward: 2048
+  dim_feedforward: 1024
   dropout: 0.0
   activation: relu
   num_denoising: 100
@@ -58,6 +58,8 @@ DINOHead:
     loss_coeff: {class: 1, bbox: 5, giou: 2}
     aux_loss: True
     use_vfl: True
+    use_same_match: True
+    same_match_ind: 0
     matcher:
       name: HungarianMatcher
       matcher_coeff: {class: 2, bbox: 5, giou: 2}

@@ -9,3 +9,4 @@ _BASE_: [
 weights: output/dino_r50_4scale_2x_coco/model_final
 find_unused_parameters: True
 log_iter: 100
+pretrain_weights: http://10.255.134.13:8091/dino/PaddleDetection/output/dino_r50vd_pan_3_0_6_5x_coco/9.pdparams

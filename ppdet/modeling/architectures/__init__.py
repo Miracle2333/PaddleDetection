@@ -73,5 +73,9 @@ from .yolof import *
 from .pose3d_metro import *
 from .centertrack import *
 from .queryinst import *
+
 from .detr_ssod import *
 from .multi_stream_detector import *
+
+from .keypoint_petr import *
+

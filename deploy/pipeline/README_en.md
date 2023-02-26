@@ -145,6 +145,16 @@ Click to download the model, then unzip and save it in the `. /output_inference`
 
 - [A quick start](docs/tutorials/ppvehicle_press_en.md)
 
+<<<<<<< HEAD
 #### Vehicle Retrograde
 
 - [A quick start](docs/tutorials/ppvehicle_retrograde_en.md)
+=======
+- [Customized development tutorials](../../docs/advanced_tutorials/customization/ppvehicle_violation_en.md)
+
+#### Vehicle Retrograde
+
+- [A quick start](docs/tutorials/ppvehicle_retrograde_en.md)
+
+- [Customized development tutorials](../../docs/advanced_tutorials/customization/ppvehicle_violation_en.md)
+>>>>>>> exp_merge_base_dino

@@ -147,6 +147,16 @@
 
 - [快速开始](docs/tutorials/ppvehicle_press.md)
 
+<<<<<<< HEAD
 #### 车辆逆行
 
 - [快速开始](docs/tutorials/ppvehicle_retrograde.md)
+=======
+- [二次开发教程](../../docs/advanced_tutorials/customization/ppvehicle_violation.md)
+
+#### 车辆逆行
+
+- [快速开始](docs/tutorials/ppvehicle_retrograde.md)
+
+- [二次开发教程](../../docs/advanced_tutorials/customization/ppvehicle_violation.md)
+>>>>>>> exp_merge_base_dino

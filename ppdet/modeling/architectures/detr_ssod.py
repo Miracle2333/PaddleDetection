@@ -104,13 +104,13 @@ class DETR_SSOD(MultiSteamDetector):
                 pad_img_af=[]
                 for img, pad_img,m in zip(data_list, tensor,mask):
                     pad_img[:, : img['image'].shape[2], : img['image'].shape[3]]=paddle.clone(img['image'].squeeze(0))
-                    m[: img['image'].shape[2], :img['image'].shape[3]] = img['pad_mask']
+                    m[: img['image'].shape[2], :img['image'].shape[3]] = paddle.to_tensor(1.0)
                     pad_img_af.append(pad_img)
                     mask_af.append(m)
                 mask_af=paddle.stack(mask_af,axis=0)
                 pad_img_af=paddle.stack(pad_img_af,axis=0)
                 data_student=copy.deepcopy(data_sup_w)
-                data_student.update({'image':pad_img_af,'pad_mask':mask_af})
+                data_student.update({'image':pad_img_af})
                 for k in data_sup_w.keys():
                     if k in ['gt_class','gt_bbox','is_crowd']:
                             data_student[k]=data_sup_w[k]
@@ -147,11 +147,9 @@ class DETR_SSOD(MultiSteamDetector):
             body_feats=self.teacher.backbone(teacher_data)
             if self.teacher.neck is not None:
                 body_feats = self.teacher.neck(body_feats)
-            pad_mask = teacher_data['pad_mask'] if self.training else None
+            pad_mask = teacher_data['pad_mask'] if self.training and 'pad_mask' in teacher_data.keys() else None
             out_transformer = self.teacher.transformer(body_feats, pad_mask, teacher_data)
             preds = self.teacher.detr_head(out_transformer, body_feats)
-        #    bbox, bbox_num = self.teacher.post_process(
-        #             preds, teacher_data['im_shape'], paddle.ones_like(teacher_data['scale_factor']))
             bbox, bbox_num = self.teacher.post_process_semi(preds)
         self.place=body_feats[0].place
 

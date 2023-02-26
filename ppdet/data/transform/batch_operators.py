@@ -1120,6 +1120,10 @@ class PadGT(BaseOperator):
             padding_mode = 'constant') -> np.ndarray:
         """Pad the given image to a certain shape or pad on all sides with
         specified padding mode and padding value.
+<<<<<<< HEAD
+=======
+
+>>>>>>> exp_merge_base_dino
         Args:
             img (ndarray): Image to be padded.
             shape (tuple[int]): Expected padding shape (h, w). Default: None.
@@ -1145,6 +1149,10 @@ class PadGT(BaseOperator):
                 on the edge. For example, padding [1, 2, 3, 4] with 2 elements on
                 both sides in symmetric mode will result in
                 [2, 1, 1, 2, 3, 4, 4, 3]
+<<<<<<< HEAD
+=======
+
+>>>>>>> exp_merge_base_dino
         Returns:
             ndarray: The padded image.
         """

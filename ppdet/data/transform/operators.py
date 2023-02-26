@@ -603,6 +603,10 @@ class PhotoMetricDistortion(BaseOperator):
     """Apply photometric distortion to image sequentially, every transformation
     is applied with a probability of 0.5. The position of random contrast is in
     second or second to last.
+<<<<<<< HEAD
+=======
+
+>>>>>>> exp_merge_base_dino
     1. random brightness
     2. random contrast (mode 0)
     3. convert color from BGR to HSV
@@ -611,6 +615,10 @@ class PhotoMetricDistortion(BaseOperator):
     6. convert color from HSV to BGR
     7. random contrast (mode 1)
     8. randomly swap channels
+<<<<<<< HEAD
+=======
+
+>>>>>>> exp_merge_base_dino
     Args:
         brightness_delta (int): delta of brightness.
         contrast_range (tuple): range of contrast.
@@ -631,8 +639,15 @@ class PhotoMetricDistortion(BaseOperator):
 
     def apply(self, results, context=None):
         """Call function to perform photometric distortion on images.
+<<<<<<< HEAD
         Args:
             results (dict): Result dict from loading pipeline.
+=======
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+>>>>>>> exp_merge_base_dino
         Returns:
             dict: Result dict with images distorted.
         """
@@ -2754,7 +2769,13 @@ class RandomSelects(BaseOperator):
     """
     Randomly choose a transformation between transforms1 and transforms2,
     and the probability of choosing transforms1 is p.
+<<<<<<< HEAD
     The code is based on https://github.com/facebookresearch/detr/blob/main/datasets/transforms.py
+=======
+
+    The code is based on https://github.com/facebookresearch/detr/blob/main/datasets/transforms.py
+
+>>>>>>> exp_merge_base_dino
     """
 
     def __init__(self, transforms_list, p=None):

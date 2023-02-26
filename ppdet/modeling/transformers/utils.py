@@ -273,3 +273,4 @@ def varifocal_loss_with_logits(pred_logits,
     loss = F.binary_cross_entropy_with_logits(
         pred_logits, gt_score, weight=weight, reduction='none')
     return loss.mean(1).sum() / normalizer
+

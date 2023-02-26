@@ -32,10 +32,10 @@ class DETR(BaseArch):
 
     def __init__(self,
                  backbone,
-                 transformer=None,
-                 detr_head=None,
+                 transformer='DETRTransformer',
+                 detr_head='DETRHead',
                  neck=None,
-                 post_process=None,
+                 post_process='DETRBBoxPostProcess',
                  post_process_semi=None,
                  exclude_post_process=False):
         super(DETR, self).__init__()
