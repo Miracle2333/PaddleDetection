@@ -90,6 +90,7 @@ class Trainer_DenseTeacher(Trainer):
         # TestDataset build after user set images, skip loader creation here
 
         # build optimizer in train mode
+        # lr需要分组
         if self.mode == 'train':
             steps_per_epoch = len(self.loader)
             if steps_per_epoch < 1:
@@ -214,13 +215,6 @@ class Trainer_DenseTeacher(Trainer):
                 enable=self.cfg.use_gpu or self.cfg.use_npu,
                 init_loss_scaling=1024)
 
-        self.status.update({
-            'epoch_id': self.start_epoch,
-            'iter_id': self.start_iter,
-            # 'step_id': self.start_step,
-            'steps_per_epoch': len(self.loader),
-        })
-
         self.status['batch_time'] = stats.SmoothedValue(
             self.cfg.log_iter, fmt='{avg:.4f}')
         self.status['data_time'] = stats.SmoothedValue(
@@ -244,35 +238,38 @@ class Trainer_DenseTeacher(Trainer):
             self._compose_callback.on_epoch_begin(self.status)
             self.loader.dataset_label.set_epoch(epoch_id)
             self.loader.dataset_unlabel.set_epoch(epoch_id)
-            iter_tic = time.time()
+            self.burnin_loader.dataset.set_epoch(epoch_id)
             if self._nranks > 1:
-                # print(model)
                 model._layers.teacher.eval()
                 model._layers.student.train()
             else:
                 model.teacher.eval()
                 model.student.train()
             iter_tic = time.time()
-            for step_id in range(len(self.loader)):
-                data = next(self.loader)
 
+            if epoch_id < self.cfg.DETR_SSOD['train_cfg']['semi_start_epochs']:
+                data_loader = self.burnin_loader
+            else:
+                data_loader = self.loader
+            
+            self.status.update({
+                'epoch_id': epoch_id,
+                'iter_id': iter_id,
+                # 'step_id': self.start_step,
+                'steps_per_epoch': len(data_loader),
+            })
+            
+            for step_id in range(len(data_loader)):
                 try:
-                    data_burnin = self.burnin_loader.next()
+                    data = next(data_loader)
                 except StopIteration:
-                    self.burnin_loader = iter(self.burnin_loader)
-                    data_burnin = self.burnin_loader.next()
-                data_sup_w, data_sup_s, data_unsup_w, data_unsup_s = data
-                data_sup_w['epoch_id'] = epoch_id
-                data_sup_s['epoch_id'] = epoch_id
-                data_unsup_w['epoch_id'] = epoch_id
-                data_unsup_s['epoch_id'] = epoch_id
-                data=[data_sup_w, data_sup_s, data_unsup_w, data_unsup_s] 
+                    data_loader = iter(data_loader)
+                    data = data_loader.next()
                 iter_id += 1
                 self.status['data_time'].update(time.time() - iter_tic)
                 self.status['step_id'] = step_id
                 self.status['iter_id'] = iter_id
-                data.append(iter_id)
-                data_burnin['iter_id'] = iter_id
+                data['epoch_id'] = epoch_id
                 profiler.add_profiler_step(profiler_options)
                 self._compose_callback.on_step_begin(self.status)
                 if self.cfg.get('amp', False):
@@ -288,14 +285,12 @@ class Trainer_DenseTeacher(Trainer):
                     scaled_loss.backward()
                     scaler.minimize(self.optimizer, scaled_loss)
                 else:
-                    if iter_id >=self.cfg.DETR_SSOD['train_cfg']['semi_start_iters']:
-                        outputs = model(data) 
-                    else:   
-                        outputs = model(data_burnin)                 
+                    outputs = model(data)
                     loss = outputs['loss']
                     # model backward
                     loss.backward()
-                    self.optimizer.step()
+                    self.optimizer.step()  
+
                 curr_lr = self.optimizer.get_lr()
                 self.lr.step()
                 if self.cfg.get('unstructured_prune'):

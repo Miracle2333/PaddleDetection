@@ -333,6 +333,7 @@ class DINOLoss(DETRLoss):
                 masks=None,
                 gt_mask=None,
                 postfix="",
+           
                 dn_out_bboxes=None,
                 dn_out_logits=None,
                 dn_meta=None,

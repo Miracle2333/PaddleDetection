@@ -458,10 +458,16 @@ class CombineSSODLoader(object):
                 unlabel_samples = next(self.unlabel_loader_iter)
 
             yield (
-                label_samples[0],  # sup weak
-                label_samples[1],  # sup strong
-                unlabel_samples[0],  # unsup weak
-                unlabel_samples[1]  # unsup strong
+                {
+                    "data_sup_weak": label_samples[0],
+                    "data_sup_strong": label_samples[1],
+                    "data_unsup_weak": unlabel_samples[0],
+                    "data_unsup_strong": unlabel_samples[1]
+                }
+                #label_samples[0],  # sup weak
+                #label_samples[1],  # sup strong
+                #unlabel_samples[0],  # unsup weak
+                #unlabel_samples[1]  # unsup strong
             )
 
     def __call__(self):

@@ -39,6 +39,7 @@ from ppdet.modeling.ssod.utils import filter_invalid, weighted_loss
 from .multi_stream_detector import MultiSteamDetector
 logger = setup_logger(__name__)
 
+
 __all__ = ['DETR_SSOD']
 @register
 class DETR_SSOD(MultiSteamDetector):
@@ -50,6 +51,8 @@ class DETR_SSOD(MultiSteamDetector):
         )
         self.semi_start_iters=train_cfg['semi_start_iters']
         self.ema_start_iters=train_cfg['ema_start_iters']
+        self.semi_start_epochs=train_cfg['semi_start_epochs']
+        self.ema_start_epochs=train_cfg['ema_start_epochs']
         self.momentum=0.9996
         if train_cfg is not None:
             self.freeze("teacher")
@@ -76,23 +79,24 @@ class DETR_SSOD(MultiSteamDetector):
         }
 
     def forward_train(self, inputs, **kwargs):
-        if isinstance(inputs,dict):
-            iter_id=inputs['iter_id']
-        elif isinstance(inputs,list):
-            iter_id=inputs[-1]
-        if iter_id==self.semi_start_iters:
+        #if isinstance(inputs,dict):
+        epoch_id=inputs['epoch_id']
+        #elif isinstance(inputs,list):
+        #    epoch_id=inputs[-1]
+        if epoch_id==self.ema_start_epochs:
             self.update_ema_model(momentum=0)
-        elif iter_id>self.semi_start_iters:
+        elif epoch_id>self.ema_start_epochs:
             self.update_ema_model(momentum=self.momentum)
         # elif iter_id<self.semi_start_iters:
         #     self.update_ema_model(momentum=0)
-        if iter_id>=self.semi_start_iters:
-            if iter_id==self.semi_start_iters:
+        if epoch_id>=self.semi_start_epochs:
+            if epoch_id==self.semi_start_epochs:
                 print('***********************')
                 print('******semi start*******')
                 print('***********************')
-            data_sup_w, data_sup_s, data_unsup_w, data_unsup_s,_=inputs
-            data_list=[data_sup_w, data_sup_s,data_unsup_s]
+            data_sup_w, data_sup_s, data_unsup_w, data_unsup_s = inputs["data_sup_weak"], \
+                inputs["data_sup_strong"], inputs["data_unsup_weak"], inputs["data_unsup_strong"]
+            data_list=[data_sup_w, data_sup_s, data_unsup_s]
             if data_list[0]['image'].shape[1] == 3:
                 max_size = _max_by_axis([list(data['image'].shape[1:]) for data in data_list])
                 batch_shape = [len(data_list)] + max_size
@@ -102,7 +106,7 @@ class DETR_SSOD(MultiSteamDetector):
                 mask = paddle.zeros((b, h, w), dtype=dtype)
                 mask_af=[]
                 pad_img_af=[]
-                for img, pad_img,m in zip(data_list, tensor,mask):
+                for img, pad_img,m in zip(data_list, tensor, mask):
                     pad_img[:, : img['image'].shape[2], : img['image'].shape[3]]=paddle.clone(img['image'].squeeze(0))
                     m[: img['image'].shape[2], :img['image'].shape[3]] = paddle.to_tensor(1.0)
                     pad_img_af.append(pad_img)
@@ -120,17 +124,16 @@ class DETR_SSOD(MultiSteamDetector):
             else:
                 raise ValueError('not supported')
             loss = {}
-            unsup_loss =  self.foward_unsup_train(data_unsup_w, data_student,data_unsup_s)
+            unsup_loss = self.foward_unsup_train(data_unsup_w, data_student,data_unsup_s)
             unsup_loss.update({
-            'loss':
-            paddle.add_n([v for k, v in unsup_loss.items() if 'log' not in k])
+                'loss': paddle.add_n([v for k, v in unsup_loss.items() if 'log' not in k])
         })
             unsup_loss = { k: v for k, v in unsup_loss.items()}
             loss.update(**unsup_loss)     
             loss.update({'loss':  unsup_loss['loss']})                
                 # loss.update({'loss': loss['sup_loss'] + self.unsup_weight*loss.get('unsup_loss', 0)})
         else:
-            if iter_id==self.semi_start_iters-1:
+            if epoch_id == self.semi_start_epochs - 1:
                 print('********************')
                 print('******sup ing*******')
                 print('********************')
@@ -150,7 +153,8 @@ class DETR_SSOD(MultiSteamDetector):
             pad_mask = teacher_data['pad_mask'] if self.training and 'pad_mask' in teacher_data.keys() else None
             out_transformer = self.teacher.transformer(body_feats, pad_mask, teacher_data)
             preds = self.teacher.detr_head(out_transformer, body_feats)
-            bbox, bbox_num = self.teacher.post_process_semi(preds)
+            #bbox, bbox_num = self.teacher.post_process_semi(preds)
+            bbox, bbox_num = self.teacher.post_process(preds, teacher_data['im_shape'], teacher_data['scale_factor'])
         self.place=body_feats[0].place
 
         if bbox.numel() > 0:
@@ -220,8 +224,8 @@ class DETR_SSOD(MultiSteamDetector):
         body_feats=self.student.backbone(student_data)
         if self.student.neck is not None:
                 body_feats = self.student.neck(body_feats)
-        pad_mask = student_data['pad_mask'] if self.training else None
-        out_transformer = self.student.transformer(body_feats, pad_mask,student_data)
+        pad_mask = student_data['pad_mask'] if self.training and 'pad_mask' in student_data.keys() else None 
+        out_transformer = self.student.transformer(body_feats, pad_mask, student_data)
         losses = self.student.detr_head(out_transformer, body_feats, student_data)
 
             # losses['loss'] = paddle.zeros([1], dtype='float32')
