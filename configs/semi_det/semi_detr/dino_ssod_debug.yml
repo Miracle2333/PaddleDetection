@@ -6,9 +6,9 @@ _BASE_: [
 ]
 
 #for debug
-eval_interval: 14500
-save_interval: 14500
-weights: output/semi_detr_semi005_size_600_1000/model_final
+eval_interval: 7270
+save_interval: 7270
+weights: output/semi_dino_semi_pretrain_39/model_final
 find_unused_parameters: True
 save_dir: output
 log_iter: 50
@@ -58,8 +58,6 @@ SemiTrainReader:
   }
   weak_aug:
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
-    - NormalizeBox: {}
-    - BboxXYXY2XYWH: {}
     - Permute: {}
   strong_aug:
     - StrongAugImage: {transforms: [
@@ -69,15 +67,24 @@ SemiTrainReader:
         RandomGrayscale: {prob: 0.2},
       ]}
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
-    - NormalizeBox: {}
-    - BboxXYXY2XYWH: {}
     - Permute: {}
   sup_batch_transforms:
     #- BatchRandomResize: {target_size: [640], random_size: True, random_interp: True, keep_ratio: False}
     - PadMaskBatch: {pad_size: [640, 640]}
+    - Permute: {}
+    - Permute: {}
+    - NormalizeBox: {} 
+    - BboxXYXY2XYWH: {}
+    - Permute: {}
   unsup_batch_transforms:
     #- BatchRandomResize: {target_size: [640], random_size: True, random_interp: True, keep_ratio: False}
     - PadMaskBatch: {pad_size: [640, 640]}
+    - Permute: {}
+    - Permute: {}
+    - NormalizeBox: {}
+    - BboxXYXY2XYWH: {}
+    - Permute: {}
+
     
   sup_batch_size: 1
   unsup_batch_size: 1
@@ -110,7 +117,8 @@ TestReader:
 #full ccoco
 #pretrain_weights: http://10.255.134.13:8091/dino/PaddleDetection/output/dino_r50vd_pan_3_0_6_5x_coco/9.pdparams
 #resnet backbone
-pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_vd_ssld_v2_pretrained.pdparams
+#pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_vd_ssld_v2_pretrained.pdparams
+pretrain_weights: http://10.255.125.21:8084/pp-dino_sup005_390.pdparams
 architecture: DETR
 
 hidden_dim: 256
@@ -187,8 +195,8 @@ DETR_SSOD:
     sup_weight: 1.0
     unsup_weight: 1.0
     #debug
-    semi_start_iters: 14540
-    ema_start_iters: 14540
+    semi_start_iters: -1
+    ema_start_iters: -1
     semi_start_epochs: -1
     ema_start_epochs: -1
     pseudo_label_initial_score_thr: 0.7
@@ -196,8 +204,6 @@ DETR_SSOD:
     concat_sup_data: True
   test_cfg:
     inference_on: teacher
-
-
 
 metric: COCO
 num_classes: 80
@@ -244,10 +250,10 @@ LearningRate:
   - !PiecewiseDecay
     gamma: 1.0
     milestones: [100]
-    use_warmup: true
-  - !LinearWarmup
-    start_factor: 0.001
-    steps: 2000
+    use_warmup: false
+  #- !LinearWarmup
+  #  start_factor: 0.001
+  #  steps: 2000
 
 OptimizerBuilder:
   clip_grad_by_norm: 0.1

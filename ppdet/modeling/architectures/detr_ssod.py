@@ -153,8 +153,8 @@ class DETR_SSOD(MultiSteamDetector):
             pad_mask = teacher_data['pad_mask'] if self.training and 'pad_mask' in teacher_data.keys() else None
             out_transformer = self.teacher.transformer(body_feats, pad_mask, teacher_data)
             preds = self.teacher.detr_head(out_transformer, body_feats)
-            #bbox, bbox_num = self.teacher.post_process_semi(preds)
-            bbox, bbox_num = self.teacher.post_process(preds, teacher_data['im_shape'], teacher_data['scale_factor'])
+            bbox, bbox_num = self.teacher.post_process_semi(preds)
+            #bbox, bbox_num = self.teacher.post_process(preds, teacher_data['im_shape'], teacher_data['scale_factor'])
         self.place=body_feats[0].place
 
         if bbox.numel() > 0:
