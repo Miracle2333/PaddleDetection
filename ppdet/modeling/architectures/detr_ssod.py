@@ -92,35 +92,29 @@ class DETR_SSOD(MultiSteamDetector):
                 print('******semi start*******')
                 print('***********************')
             data_sup_w, data_sup_s, data_unsup_w, data_unsup_s,_=inputs
-            data_list=[data_sup_w, data_sup_s,data_unsup_s]
-            if data_list[0]['image'].shape[1] == 3:
-                max_size = _max_by_axis([list(data['image'].shape[1:]) for data in data_list])
-                batch_shape = [len(data_list)] + max_size
-                b, c, h, w = batch_shape
-                dtype = data_list[0]['image'].dtype
-                tensor = paddle.zeros(batch_shape, dtype=dtype)
-                mask = paddle.zeros((b, h, w), dtype=dtype)
-                mask_af=[]
-                pad_img_af=[]
-                for img, pad_img,m in zip(data_list, tensor,mask):
-                    pad_img[:, : img['image'].shape[2], : img['image'].shape[3]]=paddle.clone(img['image'].squeeze(0))
-                    m[: img['image'].shape[2], :img['image'].shape[3]] = paddle.to_tensor(1.0)
-                    pad_img_af.append(pad_img)
-                    mask_af.append(m)
-                mask_af=paddle.stack(mask_af,axis=0)
-                pad_img_af=paddle.stack(pad_img_af,axis=0)
-                data_student=copy.deepcopy(data_sup_w)
-                data_student.update({'image':pad_img_af,'pad_mask':mask_af})
-                for k in data_sup_w.keys():
-                    if k in ['gt_class','gt_bbox','is_crowd']:
-                            data_student[k]=data_sup_w[k]
-                for k in data_sup_s.keys():
-                    if k in ['gt_class','gt_bbox','is_crowd']:
-                            data_student[k].extend(data_sup_s[k])
-            else:
-                raise ValueError('not supported')
+            
+            if data_sup_w['image'].shape != data_unsup_w['image'].shape:
+                data_sup_w, data_unsup_w = align_weak_strong_shape(data_sup_w,data_unsup_w)
+                                                                                    
+            if data_sup_s['image'].shape != data_unsup_s['image'].shape:
+                data_sup_s, data_unsup_s = align_weak_strong_shape(data_sup_s,data_unsup_s)
+            if  'gt_bbox' in data_unsup_s.keys():
+                del data_unsup_s['gt_bbox']
+            if  'gt_class' in data_unsup_s.keys():
+                del data_unsup_s['gt_class']  
+            if  'gt_class' in data_unsup_w.keys():
+                del data_unsup_w['gt_class']  
+            if  'gt_bbox' in data_unsup_w.keys():
+                del data_unsup_w['gt_bbox']    
+            for k, v in data_sup_s.items():
+                if k in ['epoch_id']:
+                    continue
+                elif k in ['gt_class','gt_bbox','is_crowd']:
+                    data_sup_s[k].extend(data_sup_w[k])
+                else:
+                    data_sup_s[k] = paddle.concat([v,data_sup_w[k]])
             loss = {}
-            unsup_loss =  self.foward_unsup_train(data_unsup_w, data_student,data_unsup_s)
+            unsup_loss =  self.foward_unsup_train(data_unsup_w,data_unsup_s,data_sup_s)
             unsup_loss.update({
             'loss':
             paddle.add_n([v for k, v in unsup_loss.items() if 'log' not in k])
@@ -141,14 +135,13 @@ class DETR_SSOD(MultiSteamDetector):
 
         return loss
 
-    def foward_unsup_train(self, teacher_data, student_data, data_unsup_s):
+    def foward_unsup_train(self, teacher_data, data_unsup_s,student_data):
 
         with paddle.no_grad():
             body_feats=self.teacher.backbone(teacher_data)
             if self.teacher.neck is not None:
-                body_feats = self.teacher.neck(body_feats)
-            pad_mask = teacher_data['pad_mask'] if self.training and 'pad_mask' in teacher_data.keys() else None
-            out_transformer = self.teacher.transformer(body_feats, pad_mask, teacher_data)
+                body_feats = self.teacher.neck(body_feats,is_teacher=True)
+            out_transformer = self.teacher.transformer(body_feats, teacher_data,is_teacher=True)
             preds = self.teacher.detr_head(out_transformer, body_feats)
             bbox, bbox_num = self.teacher.post_process_semi(preds)
         self.place=body_feats[0].place
@@ -192,16 +185,14 @@ class DETR_SSOD(MultiSteamDetector):
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
         teacher_info=[teacher_bboxes,teacher_labels]
-        student_info=student_data
+        student_sup=student_data
+        student_unsup=data_unsup_s
+        return self.compute_pseudo_label_loss(student_sup,student_unsup, teacher_info)
 
-        return self.compute_pseudo_label_loss(student_info, teacher_info)
-
-    def compute_pseudo_label_loss(self, student_info, teacher_info):                                 
+    def compute_pseudo_label_loss(self, student_sup,student_unsup, teacher_info):                                 
 
         pseudo_bboxes=list(teacher_info[0])
         pseudo_labels=list(teacher_info[1])
-        student_data=student_info
-        # print(pseudo_labels)
         losses = dict()
         for i in range(len(pseudo_bboxes)):
             if pseudo_labels[i].shape[0]==0:
@@ -214,18 +205,26 @@ class DETR_SSOD(MultiSteamDetector):
             pseudo_labels[i]= paddle.to_tensor(pseudo_labels[i],dtype=paddle.int32,place=self.place)
             pseudo_bboxes[i]= paddle.to_tensor(pseudo_bboxes[i],dtype=paddle.float32,place=self.place)
         # print(pseudo_bboxes[0].shape[0])
-        student_data['gt_bbox'].extend(pseudo_bboxes)  
-        student_data['gt_class'].extend(pseudo_labels)
+        student_unsup.update({'gt_bbox':pseudo_bboxes,'gt_class':pseudo_labels})
+        
+        for k, v in  student_sup.items():
+            if k in ['epoch_id','is_crowd']:
+                continue
+            elif k in ['gt_class','gt_bbox']:
+                student_sup[k].extend(student_unsup[k])
+            else:
+                student_sup[k] = paddle.concat([v,student_unsup[k]])
         # student_data.update(gt_bbox=pseudo_bboxes,gt_class=pseudo_labels)
-        body_feats=self.student.backbone(student_data)
+        body_feats=self.student.backbone(student_sup)
         if self.student.neck is not None:
                 body_feats = self.student.neck(body_feats)
-        pad_mask = student_data['pad_mask'] if self.training else None
-        out_transformer = self.student.transformer(body_feats, pad_mask,student_data)
-        losses = self.student.detr_head(out_transformer, body_feats, student_data)
-
+        out_transformer = self.student.transformer(body_feats,student_sup)
+        losses = self.student.detr_head(out_transformer, body_feats, student_sup)
         return losses
-    
+
+
+
+
 def box_cxcywh_to_xyxy(x):
     x_c, y_c, w, h = x.unbind(-1)
     b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
@@ -265,125 +264,48 @@ def _max_by_axis(the_list):
             maxes[index] = max(maxes[index], item)
     return maxes
 
+def align_weak_strong_shape(data_sup, data_unsup):
+    sup_shape_x = data_sup['image'].shape[2]
+    sup_shape_y = data_sup['image'].shape[3]
+
+    # scale_x_unsup = sup_shape_x / data_unsup['image'].shape[2]
+    # scale_y_unsup = sup_shape_y / data_unsup['image'].shape[3]
+    # target_size = [sup_shape_x, sup_shape_y]
+
+    data_unsup['image'] = F.interpolate(
+        data_unsup['image'],
+        size=[sup_shape_x, sup_shape_y],
+        mode='bilinear',
+        align_corners=False)
+    
+    # if 'gt_bbox' in data_unsup:
+    #     gt_bboxes = data_unsup['gt_bbox']
+    #     for i in range(len(gt_bboxes)):
+    #         if len(gt_bboxes[i]) > 0:
+    #             original_boxes = gt_bboxes[i].numpy()
+    #             original_boxes = box_cxcywh_to_xyxy(original_boxes)
+    #             _, _, img_w, img_h=data_unsup['image'].shape
+    #             _, _, img_w_s, img_h_s=data_unsup['image'].shape
+    #             scale_fct = paddle.to_tensor([img_w, img_h, img_w, img_h])
+    #             original_boxes=scale_fct*original_boxes
+    #             original_boxes[:, 0::2] = gt_bboxes[i][:, 0::2] * scale_x_unsup
+    #             original_boxes[:, 1::2] = gt_bboxes[i][:, 1::2] * scale_y_unsup
+    #             original_boxes[:, 0::2] = original_boxes[:, 0::2]
+    #             original_boxes[:, 1::2] =
+    #     data_unsup['gt_bbox'] = paddle.to_tensor(gt_bboxes)
+    return data_sup, data_unsup 
 
 
 
 
 
-
-
-
-
-
-
-        # for i in range(data_unsup_s['image'].shape[0]):
-        #     cur_boxes = teacher_bboxes[i]
-        #     if teacher_bboxes[i].sum()==0:
-        #         teacher_bboxes[i]=paddle.zeros([1,4])
-            
-        #     else:
-        #         cur_one_tensor = paddle.to_tensor([1.0, 0.0, 0.0, 0.0])
-        #         cur_one_tensor = cur_one_tensor
-        #         cur_one_tensor = cur_one_tensor.tile([teacher_bboxes[i].shape[0], 1])
-        #         if 'flipped' in teacher_data.keys() and teacher_data['flipped']:
-        #             original_boxes = paddle.abs(cur_one_tensor - teacher_bboxes[i])
-
-        #         else:
-        #             original_boxes = teacher_bboxes[i]
-
-        #         # if 'filpped' in records_unlabel_q.keys() and records_unlabel_q['filpped']:
-        #         #     cur_boxes = cur_boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]).cuda() + torch.as_tensor([img_w, 0, img_w, 0]).cuda()
-
-        #         original_boxes = box_cxcywh_to_xyxy(original_boxes)
-        #         img_w = teacher_data['OriginalImageSize'][i][1]
-        #         img_h = teacher_data['OriginalImageSize'][i][0]
-        #         scale_fct = paddle.to_tensor([img_w, img_h, img_w, img_h])
-        #         original_boxes = original_boxes * scale_fct
-        #         cur_boxes = paddle.clone(original_boxes)
-        #         cur_labels = paddle.clone(teacher_labels[i])
-        #         if 'flipped' in  data_unsup_s.keys() and  data_unsup_s['flipped']:
-        #            cur_boxes = paddle.index_select(x=cur_boxes, index=paddle.to_tensor([2,1,0,3]), axis=1) * paddle.to_tensor([-1, 1, -1, 1]) + paddle.to_tensor([img_w, 0, img_w, 0])
-  
-        #         if data_unsup_s['RandomResize_times'][i] > 1:
-        #             rescaled_size1 = data_unsup_s['RandomResize_scale'][i][0]
-                    
-        #             rescaled_size1 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size1)
-        #             ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size1, (img_w, img_h)))
-        #             ratio_width, ratio_height = ratios
-        #             cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
-        #             img_w = rescaled_size1[0]
-        #             img_h = rescaled_size1[1]
-
-                
-        #             region = data_unsup_s['RandomSizeCrop'][i]
-        #             i1, j1, h, w = region
-        #             fields = ["labels", "area", "iscrowd"]
-        #             max_size = paddle.to_tensor([w, h], dtype='float32')
-        #             cropped_boxes = cur_boxes - paddle.to_tensor([j1, i1, j1, i1])
-        #             cropped_boxes = paddle.minimum(cropped_boxes.reshape([-1, 2, 2]), max_size)
-        #             cropped_boxes = cropped_boxes.clip(min=0)
-        #             area = (cropped_boxes[:, 1, :] - cropped_boxes[:, 0, :]).prod(axis=1)
-        #             cur_boxes = cropped_boxes.reshape([-1, 4])
-        #             fields.append("boxes")
-        #             cropped_boxes = paddle.clone(cur_boxes)
-        #             cropped_boxes = cropped_boxes.reshape([-1, 2, 2])
-        #             keep = paddle.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], axis=1)
-        #             cur_boxes = cur_boxes[keep]
-        #             cur_labels = cur_labels[keep]
-        #             img_w = w
-        #             img_h = h
-        #             # random resize
-        #             rescaled_size2 = data_unsup_s['RandomResize_scale'][i][1]
-        #             rescaled_size2 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size2, max_size=max_pixels)
-        #             ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size2, (img_w, img_h)))
-        #             ratio_width, ratio_height = ratios
-        #             cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
-        #             img_w = rescaled_size2[0]
-        #             img_h = rescaled_size2[1]
-        #         else:
-        #             # random resize
-        #             rescaled_size1 = data_unsup_s['RandomResize_scale'][i][0]
-        #             rescaled_size1 = get_size_with_aspect_ratio((img_w, img_h), rescaled_size1, max_size=max_pixels)
-        #             ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_size1, (img_w, img_h)))
-        #             ratio_width, ratio_height = ratios
-        #             cur_boxes = cur_boxes * paddle.to_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
-        #             img_w = rescaled_size1[0]
-        #             img_h = rescaled_size1[1]
-
-        #         # finally, deal with normalize part in deformable detr aug code
-        #         cur_boxes = box_xyxy_to_cxcywh(cur_boxes)
-        #         cur_boxes = cur_boxes / paddle.to_tensor([img_w, img_h, img_w, img_h], dtype=paddle.float32)   
-
-        #     if 'RandomErasing' in data_unsup_s.keys():
-        #         region = data_unsup_s['RandomErasing'][0]
-        #         i, j, h, w, _ = region
-        #         cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
-        #         i = i / img_h
-        #         j = j / img_w
-        #         h = h / img_h
-        #         w = w / img_w
-        #         keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
-        #         cur_boxes = cur_boxes[keep]
-        #         cur_labels = cur_labels[keep]
-        #         region = data_unsup_s['RandomErasing'][1]
-        #         i, j, h, w, _ = region
-        #         cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
-        #         i = i / img_h
-        #         j = j / img_w
-        #         h = h / img_h
-        #         w = w / img_w
-        #         keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
-        #         cur_boxes = cur_boxes[keep]
-        #         cur_labels = cur_labels[keep]
-        #         region = data_unsup_s['RandomErasing'][2]
-        #         i, j, h, w, _ = region
-        #         cur_boxes_xy = box_cxcywh_to_xyxy(cur_boxes)
-        #         i = i / img_h
-        #         j = j / img_w
-        #         h = h / img_h
-        #         w = w / img_w
-        #         keep = ~((cur_boxes_xy[:, 0] > j) & (cur_boxes_xy[:, 1] > i) & (cur_boxes_xy[:, 2] < j + w) & (cur_boxes_xy[:, 3] < i + h))
-        #         cur_boxes = cur_boxes[keep]
-        #         cur_labels = cur_labels[keep]
-        #     teacher_bboxes[i]=cur_boxes
-        
+        # im = sample['image']
+        # if  'gt_bbox' in sample.keys():
+        #     gt_bbox = sample['gt_bbox']
+        #     height, width, _ = im.shape
+        #     for i in range(gt_bbox.shape[0]):
+        #         gt_bbox[i][0] = gt_bbox[i][0] / width
+        #         gt_bbox[i][1] = gt_bbox[i][1] / height
+        #         gt_bbox[i][2] = gt_bbox[i][2] / width
+        #         gt_bbox[i][3] = gt_bbox[i][3] / height
+        #     sample['gt_bbox'] = gt_bbox

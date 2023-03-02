@@ -29,7 +29,7 @@ SemiTrainReader:
     - RandomCrop: {prob: 0.8}
     - RandomFlip: {}
   weak_aug:
-    - RandomCrop: {prob: 0.0}
+    - RandomFlip: {prob: 0.0}
   strong_aug:
     - StrongAugImage: {transforms: [
         RandomColorJitter: {prob: 0.8, brightness: 0.4, contrast: 0.4, saturation: 0.4, hue: 0.1},
@@ -38,19 +38,19 @@ SemiTrainReader:
         RandomGrayscale: {prob: 0.2},
       ]}
   sup_batch_transforms:
-    - BatchRandomResize: {target_size: [640], random_size: True, random_interp: True, keep_ratio: False}
+    - BatchRandomResize: {target_size: [480, 512, 544, 576, 608, 640, 640, 640, 672, 704, 736, 768, 800], random_size: True, random_interp: True, keep_ratio: False}
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
   unsup_batch_transforms:
-    - BatchRandomResize: {target_size: [640], random_size: True, random_interp: True, keep_ratio: False}
+    - BatchRandomResize: {target_size: [480, 512, 544, 576, 608, 640, 640, 640, 672, 704, 736, 768, 800], random_size: True, random_interp: True, keep_ratio: False}
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  sup_batch_size: 1
-  unsup_batch_size: 1
+  sup_batch_size: 2
+  unsup_batch_size: 2
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -176,7 +176,7 @@ num_classes: 80
 TrainDataset:
   !SemiCOCODataSet
     image_dir: train2017
-    anno_path: semi_annotations/instances_train2017.1@5.json
+    anno_path: semi_annotations/instances_train2017.1@1.json
     dataset_dir: dataset/coco
     data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
 # partial unlabeled COCO, use `SemiCOCODataSet` rather than `COCODataSet`

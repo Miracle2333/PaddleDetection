@@ -390,9 +390,13 @@ class BatchCompose_SSOD(Compose):
             sample.pop('strong_aug')
 
         for f in self.transforms_cls:
-            try:
+            try:     
                 data = f(data)
-                strong_data = f(strong_data)
+                if 'BatchRandomResize' in f._id:
+                    strong_data = f(strong_data,data[1])[0]
+                    data = data[0]
+                else:
+                    strong_data = f(strong_data)
             except Exception as e:
                 stack_info = traceback.format_exc()
                 logger.warning("fail to map batch transform [{}] "
@@ -431,6 +435,7 @@ class BatchCompose_SSOD(Compose):
                 tmp_data = []
                 for i in range(len(strong_data)):
                     tmp_data.append(strong_data[i][k])
+                    # print(tmp_data)
                 if not 'gt_' in k and not 'is_crowd' in k and not 'difficult' in k:
                     tmp_data = np.stack(tmp_data, axis=0)
                 strong_batch_data[k] = tmp_data

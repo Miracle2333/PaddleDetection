@@ -1139,7 +1139,7 @@ class YOLOCSPPAN(nn.Layer):
 
         return pos_emb
 
-    def forward(self, feats, for_mot=False):
+    def forward(self, feats, for_mot=False,is_teacher=True):
         assert len(feats) == len(self.in_channels)
         if self.proj_dim is not None:
             for idx in range(len(self.proj_dim)):
@@ -1152,7 +1152,7 @@ class YOLOCSPPAN(nn.Layer):
 
                 # flatten [B, C, H, W] to [B, HxW, C]
                 src_flatten = last_feat.flatten(2).transpose([0, 2, 1])
-                if self.eval_size is not None and not self.training:
+                if self.eval_size is not None and not self.training and not is_teacher:
                     if stride == 8:
                         pos_embed = self.pos_embed_p3
                     elif stride == 16:

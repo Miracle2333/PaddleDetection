@@ -1612,6 +1612,8 @@ class RandomCrop(BaseOperator):
             # only used in semi-det as unsup data
             sample = self.set_fake_bboxes(sample)
             sample = self.random_crop(sample, fake_bboxes=True)
+            del sample['gt_bbox']
+            del sample['gt_class']
             return sample
 
         if 'gt_bbox' in sample and len(sample['gt_bbox']) == 0:
