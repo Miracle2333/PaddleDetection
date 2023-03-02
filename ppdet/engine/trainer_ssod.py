@@ -34,7 +34,7 @@ from ppdet.core.workspace import create
 from ppdet.utils.checkpoint import load_weight, load_pretrain_weight
 import ppdet.utils.stats as stats
 from ppdet.utils import profiler
-from ppdet.modeling.ssod.utils import align_weak_strong_shape
+# from ppdet.modeling.ssod_utils import align_weak_strong_shape
 from .trainer import Trainer
 
 from ppdet.utils.logger import setup_logger
@@ -60,15 +60,12 @@ class Trainer_DenseTeacher(Trainer):
         capital_mode = self.mode.capitalize()
         self.dataset = self.cfg['{}Dataset'.format(capital_mode)] = create(
             '{}Dataset'.format(capital_mode))()
+
         if self.mode == 'train':
-            self.burnin_dataset = self.cfg['BurninTrainDataset'] = create(
-                'BurninTrainDataset')
             self.dataset_unlabel = self.cfg['UnsupTrainDataset'] = create(
                 'UnsupTrainDataset')
             self.loader = create('SemiTrainReader')(
                 self.dataset, self.dataset_unlabel, cfg.worker_num)
-            self.burnin_loader = create('TrainReader')(
-                self.burnin_dataset, cfg.worker_num)
 
         # build model
         if 'model' not in self.cfg:
@@ -148,6 +145,9 @@ class Trainer_DenseTeacher(Trainer):
         self._init_metrics()
         self._reset_metrics()
 
+
+
+
     def load_semi_weights(self, t_weights, s_weights):
         if self.is_loaded_weights:
             return
@@ -156,17 +156,7 @@ class Trainer_DenseTeacher(Trainer):
         load_pretrain_weight(self.model.student, s_weights)
         logger.info("Load teacher weights {} to start training".format(t_weights))
         logger.info("Load student weights {} to start training".format(s_weights))
-    
-    def load_weights(self, weights):
-        if self.is_loaded_weights:
-            return
-        t_weights = weights
-        s_weights = weights
-        self.start_epoch = 0
-        load_pretrain_weight(self.model.teacher, t_weights)
-        load_pretrain_weight(self.model.student, s_weights)
-        logger.info("Load teacher weights {} to start training".format(t_weights))
-        logger.info("Load student weights {} to start training".format(s_weights))
+
 
     def resume_weights(self, weights, exchange=True):
         # support Distill resume weights
@@ -255,12 +245,6 @@ class Trainer_DenseTeacher(Trainer):
             iter_tic = time.time()
             for step_id in range(len(self.loader)):
                 data = next(self.loader)
-
-                try:
-                    data_burnin = self.burnin_loader.next()
-                except StopIteration:
-                    self.burnin_loader = iter(self.burnin_loader)
-                    data_burnin = self.burnin_loader.next()
                 data_sup_w, data_sup_s, data_unsup_w, data_unsup_s = data
                 data_sup_w['epoch_id'] = epoch_id
                 data_sup_s['epoch_id'] = epoch_id
@@ -272,7 +256,6 @@ class Trainer_DenseTeacher(Trainer):
                 self.status['step_id'] = step_id
                 self.status['iter_id'] = iter_id
                 data.append(iter_id)
-                data_burnin['iter_id'] = iter_id
                 profiler.add_profiler_step(profiler_options)
                 self._compose_callback.on_step_begin(self.status)
                 if self.cfg.get('amp', False):
@@ -288,10 +271,7 @@ class Trainer_DenseTeacher(Trainer):
                     scaled_loss.backward()
                     scaler.minimize(self.optimizer, scaled_loss)
                 else:
-                    if iter_id >=self.cfg.DETR_SSOD['train_cfg']['semi_start_iters']:
-                        outputs = model(data) 
-                    else:   
-                        outputs = model(data_burnin)                 
+                    outputs = model(data)                    
                     loss = outputs['loss']
                     # model backward
                     loss.backward()

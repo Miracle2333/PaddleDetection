@@ -110,7 +110,7 @@ class DETR_SSOD(MultiSteamDetector):
                 mask_af=paddle.stack(mask_af,axis=0)
                 pad_img_af=paddle.stack(pad_img_af,axis=0)
                 data_student=copy.deepcopy(data_sup_w)
-                data_student.update({'image':pad_img_af})
+                data_student.update({'image':pad_img_af,'pad_mask':mask_af})
                 for k in data_sup_w.keys():
                     if k in ['gt_class','gt_bbox','is_crowd']:
                             data_student[k]=data_sup_w[k]
@@ -224,43 +224,8 @@ class DETR_SSOD(MultiSteamDetector):
         out_transformer = self.student.transformer(body_feats, pad_mask,student_data)
         losses = self.student.detr_head(out_transformer, body_feats, student_data)
 
-            # losses['loss'] = paddle.zeros([1], dtype='float32')
-            # losses['loss_class'] = paddle.zeros([1], dtype='float32')
-            # losses['loss_bbox'] = paddle.zeros([1], dtype='float32')
-            # losses['loss_giou'] = paddle.zeros([1], dtype='float32')
-            # losses['loss_class_aux'] = paddle.zeros([1], dtype='float32')
-            # losses['loss_bbox_aux'] = paddle.zeros([1], dtype='float32')
-            # losses['loss_giou_aux'] = paddle.zeros([1], dtype='float32')
         return losses
-
-
-
-    def normalize_box(self,sample,):
-        im = sample['image']
-        if  'gt_bbox' in sample.keys():
-            gt_bbox = sample['gt_bbox']
-            gt_class = sample['gt_class']
-            # _, _, height, width, = im.shape
-            for i in range(len(gt_bbox)):
-                # for j in range(gt_bbox[i].shape[0]):
-                #     gt_bbox[i][j][0] = gt_bbox[i][j][0] / width
-                #     gt_bbox[i][j][1] = gt_bbox[i][j][1] / height
-                #     gt_bbox[i][j][2] = gt_bbox[i][j][2] / width
-                #     gt_bbox[i][j][3] = gt_bbox[i][j][3] / height
-                    gt_class[i]= paddle.to_tensor(gt_class[i],dtype=paddle.int32,place=self.place)
-            sample['gt_bbox'] = gt_bbox
-            sample['gt_class'] = gt_class
-        if  'gt_bbox' in sample.keys():
-            bbox = sample['gt_bbox']
-            for i in range(len(bbox)):
-                # bbox[i][:, 2:4] = bbox[i][:, 2:4] - bbox[i][:, :2]
-                # bbox[i][:, :2] = bbox[i][:, :2] + bbox[i][:, 2:4] / 2.
-                bbox[i]= paddle.to_tensor(bbox[i],dtype=paddle.float32,place=self.place)
-            sample['gt_bbox'] = bbox
-
-        
-        return sample
-
+    
 def box_cxcywh_to_xyxy(x):
     x_c, y_c, w, h = x.unbind(-1)
     b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
