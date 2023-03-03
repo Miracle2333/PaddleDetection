@@ -6,8 +6,8 @@ _BASE_: [
 ]
 
 #for debug
-eval_interval: 500
-save_interval: 500
+eval_interval: 3600
+save_interval: 3600
 weights: output/semi_detr_semi005_size_600_1000/model_final
 find_unused_parameters: True
 save_dir: output
@@ -176,7 +176,7 @@ num_classes: 80
 TrainDataset:
   !SemiCOCODataSet
     image_dir: train2017
-    anno_path: semi_annotations/instances_train2017.1@1.json
+    anno_path: semi_annotations/instances_train2017.1@5.json
     dataset_dir: dataset/coco
     data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
 # partial unlabeled COCO, use `SemiCOCODataSet` rather than `COCODataSet`
