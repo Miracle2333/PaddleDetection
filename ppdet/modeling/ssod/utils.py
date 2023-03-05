@@ -107,7 +107,7 @@ def QFLv2(pred_sigmoid,
 def filter_invalid(bbox, label=None, score=None, mask=None, thr=0.0, min_size=0):
     if score.numel() > 0:
         # valid = score > thr
-        valid = score >= thr
+        valid = score >= paddle.to_tensor(thr)[label.astype('int32')]
         # if valid.shape[0] == 1 :
         #     bbox = bbox if valid.item() else paddle.expand(paddle.to_tensor([])[:, None], (-1, 4))
         # else:

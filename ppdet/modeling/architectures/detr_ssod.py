@@ -51,6 +51,8 @@ class DETR_SSOD(MultiSteamDetector):
         self.semi_start_iters=train_cfg['semi_start_iters']
         self.ema_start_iters=train_cfg['ema_start_iters']
         self.momentum=0.9996
+        self.cls_thr=None
+        self.cls_thr_ig=None
         if train_cfg is not None:
             self.freeze("teacher")
             self.unsup_weight = self.train_cfg['unsup_weight']
@@ -143,45 +145,27 @@ class DETR_SSOD(MultiSteamDetector):
                 body_feats = self.teacher.neck(body_feats,is_teacher=True)
             out_transformer = self.teacher.transformer(body_feats, teacher_data,is_teacher=True)
             preds = self.teacher.detr_head(out_transformer, body_feats)
-            bbox, bbox_num = self.teacher.post_process_semi(preds)
+            bbox=preds[0].astype('float32')
+            label=preds[1].argmax(-1).unsqueeze(-1).astype('float32')
+            score=F.softmax(preds[1],axis=2).max(-1).unsqueeze(-1).astype('float32')
         self.place=body_feats[0].place
 
-        if bbox.numel() > 0:
-            proposal_list = paddle.concat([bbox[:, 2:], bbox[:, 1:2]], axis=-1)
-            proposal_list = proposal_list.split(tuple(np.array(bbox_num)), 0)
-        else:
-            proposal_list = [paddle.expand(paddle.to_tensor([])[:, None], (-1, 5),place=self.place)]
-        
-        proposal_label_list = paddle.cast(bbox[:, 0], np.int32)
-        proposal_label_list = proposal_label_list.split(tuple(np.array(bbox_num)), 0)
-            
-        proposal_list = [paddle.to_tensor(p, place=self.place) for p in proposal_list]
-        proposal_label_list = [paddle.to_tensor(p, place=self.place) for p in proposal_label_list]
-        # print(bbox[:,1].max())
-        # filter invalid box roughly
+
+        proposal_list=paddle.concat([label,score,bbox],axis=-1)
+        print(score.max())    
+
         if isinstance(self.train_cfg['pseudo_label_initial_score_thr'], float):
             thr = self.train_cfg['pseudo_label_initial_score_thr']
         else:
             # TODO: use dynamic threshold
-            raise NotImplementedError("Dynamic Threshold is not implemented yet.")
-        # print("thr0.5 :",sum([len(bbox) for bbox in proposal_list]), "\tscore:",[proposal[:, -1] for proposal in proposal_list])
-        
-        proposal_list, proposal_label_list, _ = list(
-            zip(
-                *[
-                    filter_invalid(
-                        proposal[:,:4],
-                        proposal_label,
-                        proposal[:, -1],
-                        thr=thr,
-                        min_size=self.train_cfg['min_pseduo_box_size'],
-                    )
-                    for proposal, proposal_label in zip(
-                        proposal_list, proposal_label_list
-                    )
-                ]
-            )
-        )
+            raise NotImplementedError("Dynamic Threshold is not implemented yet.") 
+        proposal_list, proposal_label_list = filter_invalid(
+                                                                bbox[:,:],
+                                                                label[:,:,0],
+                                                                score[:,:,0],
+                                                                thr=self.cls_thr,
+                                                                min_size=self.train_cfg['min_pseduo_box_size'],)
+
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
         teacher_info=[teacher_bboxes,teacher_labels]
