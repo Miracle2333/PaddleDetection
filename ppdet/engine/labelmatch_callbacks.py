@@ -196,7 +196,6 @@ class LabelMatchEvalCallback(Callback):
         for i, score in enumerate(score_list):
             cls_thr[i] = max(0.05, score[min(int(self.potential_positive[i] * percent), len(score) - 1)])# reliable pseudo label
             cls_thr_ig[i] = max(self.min_thr, score[min(int(self.potential_positive[i]), len(score) - 1)])
-            cls_thr_ig[i]=min(0.4,cls_thr_ig[i])
 
         logger.info(f'current percent: {percent}')
         info = ' '.join([f'({v:.2f}-{self.CLASSES[i]})' for i, v in enumerate(cls_thr)])

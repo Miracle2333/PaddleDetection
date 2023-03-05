@@ -148,23 +148,46 @@ class DETR_SSOD(MultiSteamDetector):
             bbox=preds[0].astype('float32')
             label=preds[1].argmax(-1).unsqueeze(-1).astype('float32')
             score=F.softmax(preds[1],axis=2).max(-1).unsqueeze(-1).astype('float32')
+            bs,bbox_num=bbox.shape[:2]
+            bbox_num=paddle.tile(paddle.to_tensor([bbox_num]), [bs])
         self.place=body_feats[0].place
 
 
-        proposal_list=paddle.concat([label,score,bbox],axis=-1)
-        print(score.max())    
+        bboxes=paddle.concat([label,score,bbox],axis=-1).reshape([-1,6])
+        # print(score.max())    
+        if bboxes.numel() > 0:
+            proposal_list = paddle.concat([bboxes[:,2:], bboxes[:,1:2]], axis=-1)
+            proposal_list = proposal_list.split(tuple(np.array(bbox_num)), 0)
+        else:
+            proposal_list = [paddle.expand(paddle.to_tensor([])[:, None], (-1, 5),place=self.place)]
+        
+        proposal_label_list = paddle.cast(bboxes[:, 0], np.int32)
+        proposal_label_list = proposal_label_list.split(tuple(np.array(bbox_num)), 0)
+            
+        proposal_list = [paddle.to_tensor(p, place=self.place) for p in proposal_list]
+        proposal_label_list = [paddle.to_tensor(p, place=self.place) for p in proposal_label_list]
 
         if isinstance(self.train_cfg['pseudo_label_initial_score_thr'], float):
             thr = self.train_cfg['pseudo_label_initial_score_thr']
         else:
             # TODO: use dynamic threshold
             raise NotImplementedError("Dynamic Threshold is not implemented yet.") 
-        proposal_list, proposal_label_list = filter_invalid(
-                                                                bbox[:,:],
-                                                                label[:,:,0],
-                                                                score[:,:,0],
-                                                                thr=self.cls_thr,
-                                                                min_size=self.train_cfg['min_pseduo_box_size'],)
+        proposal_list, proposal_label_list, _ = list(
+            zip(
+                *[
+                    filter_invalid(
+                        proposal[:,:4],
+                        proposal_label,
+                        proposal[:, -1],
+                        thr=self.cls_thr,
+                        min_size=self.train_cfg['min_pseduo_box_size'],
+                    )
+                    for proposal, proposal_label in zip(
+                        proposal_list, proposal_label_list
+                    )
+                ]
+            )
+        )
 
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list

@@ -49,8 +49,8 @@ SemiTrainReader:
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  sup_batch_size: 1
-  unsup_batch_size: 1
+  sup_batch_size: 2
+  unsup_batch_size: 2
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -78,8 +78,8 @@ TestReader:
   drop_last: false
 
 
-pretrain_student_weights: /paddle/PaddleDetection/pp-dino_sup005_390.pdparams
-pretrain_teacher_weights: /paddle/PaddleDetection/pp-dino_sup005_390.pdparams
+pretrain_student_weights: pp-dino_sup005_390.pdparams
+pretrain_teacher_weights: pp-dino_sup005_390.pdparams
 # pretrain_weights: pp-dino_sup005_390.pdparams
 architecture: DETR
 
@@ -208,7 +208,7 @@ LearningRate:
   - !PiecewiseDecay
     gamma: 1.0
     milestones: [180]
-    use_warmup: true
+    use_warmup: false
   - !LinearWarmup
     start_factor: 0.001
     steps: 2000
@@ -241,6 +241,6 @@ TrainDatasetLM:
     anno_path: annotations/instances_val2017.json
     dataset_dir: dataset/coco
     data_fields: ['image', 'gt_bbox', 'gt_class']
-    manual_length: 50
+    manual_length: 5000
 percent: 0.2
 label_match: True
