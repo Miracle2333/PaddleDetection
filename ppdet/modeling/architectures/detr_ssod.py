@@ -192,6 +192,21 @@ class DETR_SSOD(MultiSteamDetector):
 
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
+        for i in range(len(teacher_bboxes)):
+            if teacher_bboxes[i].sum()==0:
+                teacher_bboxes[i]=paddle.zeros([0,4])
+            
+            else:
+                cur_one_tensor = paddle.to_tensor([1.0, 0.0, 0.0, 0.0])
+                cur_one_tensor = cur_one_tensor
+                cur_one_tensor = cur_one_tensor.tile([teacher_bboxes[i].shape[0], 1])
+                if 'flipped' in data_unsup_w.keys() and (data_unsup_w['flipped']^data_unsup_w['flipped']):
+                    teacher_bboxes[i] = paddle.abs(cur_one_tensor - teacher_bboxes[i])
+                else:
+                    teacher_bboxes[i] = teacher_bboxes[i]
+                
+
+                
         teacher_info=[teacher_bboxes,teacher_labels]
         student_unsup=data_unsup_s
         return self.compute_pseudo_label_loss(student_unsup, teacher_info)

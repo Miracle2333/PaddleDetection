@@ -821,6 +821,7 @@ class RandomFlip(BaseOperator):
             sample: the image, bounding box and segmentation part
                     in sample are flipped.
         """
+        sample['flipped'] = False
         if np.random.uniform(0, 1) < self.prob:
             im = sample['image']
             height, width = im.shape[:2]
