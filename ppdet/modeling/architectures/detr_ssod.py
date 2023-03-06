@@ -95,11 +95,9 @@ class DETR_SSOD(MultiSteamDetector):
                 print('***********************')
             data_sup_w, data_sup_s, data_unsup_w, data_unsup_s,_=inputs
             
-            if data_sup_w['image'].shape != data_unsup_w['image'].shape:
-                data_sup_w, data_unsup_w = align_weak_strong_shape(data_sup_w,data_unsup_w)
+            if data_sup_w['image'].shape != data_sup_s['image'].shape:
+                data_sup_w, data_sup_s = align_weak_strong_shape(data_sup_w,data_sup_s)
                                                                                     
-            if data_sup_s['image'].shape != data_unsup_s['image'].shape:
-                data_sup_s, data_unsup_s = align_weak_strong_shape(data_sup_s,data_unsup_s)
             if  'gt_bbox' in data_unsup_s.keys():
                 del data_unsup_s['gt_bbox']
             if  'gt_class' in data_unsup_s.keys():
@@ -115,16 +113,19 @@ class DETR_SSOD(MultiSteamDetector):
                     data_sup_s[k].extend(data_sup_w[k])
                 else:
                     data_sup_s[k] = paddle.concat([v,data_sup_w[k]])
-            loss = {}
-            unsup_loss =  self.foward_unsup_train(data_unsup_w,data_unsup_s,data_sup_s)
+            loss={}
+            sup_loss = self.student(data_sup_s)
+            sup_loss = {"sup_" + k: v for k, v in sup_loss.items()}
+            loss.update(**sup_loss)   
+            unsup_loss =  self.foward_unsup_train(data_unsup_w, data_unsup_s)
             unsup_loss.update({
             'loss':
             paddle.add_n([v for k, v in unsup_loss.items() if 'log' not in k])
         })
-            unsup_loss = { k: v for k, v in unsup_loss.items()}
+            unsup_loss = {"unsup_" + k: v for k, v in unsup_loss.items()}
             loss.update(**unsup_loss)     
-            loss.update({'loss':  unsup_loss['loss']})                
-                # loss.update({'loss': loss['sup_loss'] + self.unsup_weight*loss.get('unsup_loss', 0)})
+            
+            loss.update({'loss': loss['sup_loss'] + self.unsup_weight*loss.get('unsup_loss', 0)})
         else:
             if iter_id==self.semi_start_iters-1:
                 print('********************')
@@ -137,43 +138,65 @@ class DETR_SSOD(MultiSteamDetector):
 
         return loss
 
-    def foward_unsup_train(self, teacher_data, data_unsup_s,student_data):
+    def foward_unsup_train(self, data_unsup_w, data_unsup_s):
 
         with paddle.no_grad():
-            body_feats=self.teacher.backbone(teacher_data)
+            body_feats=self.teacher.backbone(data_unsup_w)
             if self.teacher.neck is not None:
                 body_feats = self.teacher.neck(body_feats,is_teacher=True)
-            out_transformer = self.teacher.transformer(body_feats, teacher_data,is_teacher=True)
+            out_transformer = self.teacher.transformer(body_feats, data_unsup_w,is_teacher=True)
             preds = self.teacher.detr_head(out_transformer, body_feats)
             bbox=preds[0].astype('float32')
             label=preds[1].argmax(-1).unsqueeze(-1).astype('float32')
             score=F.softmax(preds[1],axis=2).max(-1).unsqueeze(-1).astype('float32')
+            bs,bbox_num=bbox.shape[:2]
+            bbox_num=paddle.tile(paddle.to_tensor([bbox_num]), [bs])
         self.place=body_feats[0].place
 
 
-        proposal_list=paddle.concat([label,score,bbox],axis=-1)
-        print(score.max())    
+        bboxes=paddle.concat([label,score,bbox],axis=-1).reshape([-1,6])
+        # print(score.max())    
+        if bboxes.numel() > 0:
+            proposal_list = paddle.concat([bboxes[:,2:], bboxes[:,1:2]], axis=-1)
+            proposal_list = proposal_list.split(tuple(np.array(bbox_num)), 0)
+        else:
+            proposal_list = [paddle.expand(paddle.to_tensor([])[:, None], (-1, 5),place=self.place)]
+        
+        proposal_label_list = paddle.cast(bboxes[:, 0], np.int32)
+        proposal_label_list = proposal_label_list.split(tuple(np.array(bbox_num)), 0)
+            
+        proposal_list = [paddle.to_tensor(p, place=self.place) for p in proposal_list]
+        proposal_label_list = [paddle.to_tensor(p, place=self.place) for p in proposal_label_list]
 
         if isinstance(self.train_cfg['pseudo_label_initial_score_thr'], float):
             thr = self.train_cfg['pseudo_label_initial_score_thr']
         else:
             # TODO: use dynamic threshold
             raise NotImplementedError("Dynamic Threshold is not implemented yet.") 
-        proposal_list, proposal_label_list = filter_invalid(
-                                                                bbox[:,:],
-                                                                label[:,:,0],
-                                                                score[:,:,0],
-                                                                thr=self.cls_thr,
-                                                                min_size=self.train_cfg['min_pseduo_box_size'],)
+        proposal_list, proposal_label_list, _ = list(
+            zip(
+                *[
+                    filter_invalid(
+                        proposal[:,:4],
+                        proposal_label,
+                        proposal[:, -1],
+                        thr=thr,
+                        min_size=self.train_cfg['min_pseduo_box_size'],
+                    )
+                    for proposal, proposal_label in zip(
+                        proposal_list, proposal_label_list
+                    )
+                ]
+            )
+        )
 
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
         teacher_info=[teacher_bboxes,teacher_labels]
-        student_sup=student_data
         student_unsup=data_unsup_s
-        return self.compute_pseudo_label_loss(student_sup,student_unsup, teacher_info)
+        return self.compute_pseudo_label_loss(student_unsup, teacher_info)
 
-    def compute_pseudo_label_loss(self, student_sup,student_unsup, teacher_info):                                 
+    def compute_pseudo_label_loss(self,student_unsup, teacher_info):                                 
 
         pseudo_bboxes=list(teacher_info[0])
         pseudo_labels=list(teacher_info[1])
@@ -191,19 +214,12 @@ class DETR_SSOD(MultiSteamDetector):
         # print(pseudo_bboxes[0].shape[0])
         student_unsup.update({'gt_bbox':pseudo_bboxes,'gt_class':pseudo_labels})
         
-        for k, v in  student_sup.items():
-            if k in ['epoch_id','is_crowd']:
-                continue
-            elif k in ['gt_class','gt_bbox']:
-                student_sup[k].extend(student_unsup[k])
-            else:
-                student_sup[k] = paddle.concat([v,student_unsup[k]])
         # student_data.update(gt_bbox=pseudo_bboxes,gt_class=pseudo_labels)
-        body_feats=self.student.backbone(student_sup)
+        body_feats=self.student.backbone(student_unsup)
         if self.student.neck is not None:
                 body_feats = self.student.neck(body_feats)
-        out_transformer = self.student.transformer(body_feats,student_sup)
-        losses = self.student.detr_head(out_transformer, body_feats, student_sup)
+        out_transformer = self.student.transformer(body_feats,student_unsup)
+        losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
         return losses
 
 
@@ -248,48 +264,17 @@ def _max_by_axis(the_list):
             maxes[index] = max(maxes[index], item)
     return maxes
 
-def align_weak_strong_shape(data_sup, data_unsup):
-    sup_shape_x = data_sup['image'].shape[2]
-    sup_shape_y = data_sup['image'].shape[3]
+def align_weak_strong_shape(data_weak, data_strong):
+    shape_x = data_strong['image'].shape[2]
+    shape_y = data_strong['image'].shape[3]
+    
+    target_size = [shape_x, shape_y]
 
-    # scale_x_unsup = sup_shape_x / data_unsup['image'].shape[2]
-    # scale_y_unsup = sup_shape_y / data_unsup['image'].shape[3]
-    # target_size = [sup_shape_x, sup_shape_y]
-
-    data_unsup['image'] = F.interpolate(
-        data_unsup['image'],
-        size=[sup_shape_x, sup_shape_y],
+    # if scale_x_w != 1 or scale_y_w != 1:
+    data_weak['image'] = F.interpolate(
+        data_weak['image'],
+        size=target_size,
         mode='bilinear',
         align_corners=False)
-    
-    # if 'gt_bbox' in data_unsup:
-    #     gt_bboxes = data_unsup['gt_bbox']
-    #     for i in range(len(gt_bboxes)):
-    #         if len(gt_bboxes[i]) > 0:
-    #             original_boxes = gt_bboxes[i].numpy()
-    #             original_boxes = box_cxcywh_to_xyxy(original_boxes)
-    #             _, _, img_w, img_h=data_unsup['image'].shape
-    #             _, _, img_w_s, img_h_s=data_unsup['image'].shape
-    #             scale_fct = paddle.to_tensor([img_w, img_h, img_w, img_h])
-    #             original_boxes=scale_fct*original_boxes
-    #             original_boxes[:, 0::2] = gt_bboxes[i][:, 0::2] * scale_x_unsup
-    #             original_boxes[:, 1::2] = gt_bboxes[i][:, 1::2] * scale_y_unsup
-    #             original_boxes[:, 0::2] = original_boxes[:, 0::2]
-    #             original_boxes[:, 1::2] =
-    #     data_unsup['gt_bbox'] = paddle.to_tensor(gt_bboxes)
-    return data_sup, data_unsup 
+    return data_weak, data_strong
 
-
-
-
-
-        # im = sample['image']
-        # if  'gt_bbox' in sample.keys():
-        #     gt_bbox = sample['gt_bbox']
-        #     height, width, _ = im.shape
-        #     for i in range(gt_bbox.shape[0]):
-        #         gt_bbox[i][0] = gt_bbox[i][0] / width
-        #         gt_bbox[i][1] = gt_bbox[i][1] / height
-        #         gt_bbox[i][2] = gt_bbox[i][2] / width
-        #         gt_bbox[i][3] = gt_bbox[i][3] / height
-        #     sample['gt_bbox'] = gt_bbox

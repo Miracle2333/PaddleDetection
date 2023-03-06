@@ -49,8 +49,8 @@ SemiTrainReader:
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  sup_batch_size: 1
-  unsup_batch_size: 1
+  sup_batch_size: 2
+  unsup_batch_size: 2
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -78,8 +78,8 @@ TestReader:
   drop_last: false
 
 
-pretrain_student_weights: /paddle/PaddleDetection/pp-dino_sup005_390.pdparams
-pretrain_teacher_weights: /paddle/PaddleDetection/pp-dino_sup005_390.pdparams
+pretrain_student_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_cos_pretrained.pdparams
+pretrain_teacher_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_cos_pretrained.pdparams
 # pretrain_weights: pp-dino_sup005_390.pdparams
 architecture: DETR
 
@@ -225,7 +225,7 @@ update_interval: 1000
 LMReader:
   sample_transforms:
     - Decode: {}
-    - Resize: {target_size: [320, 320], keep_ratio: False}
+    - Resize: { target_size: [640, 640], keep_ratio: False }
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
     - Permute: {}
   batch_size: 1
@@ -243,4 +243,4 @@ TrainDatasetLM:
     data_fields: ['image', 'gt_bbox', 'gt_class']
     manual_length: 50
 percent: 0.2
-label_match: True
+label_match: false

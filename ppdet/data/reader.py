@@ -391,13 +391,9 @@ class BatchCompose_SSOD(Compose):
             sample.pop('strong_aug')
 
         for f in self.transforms_cls:
-            try:     
+            try:
                 data = f(data)
-                if 'BatchRandomResize' in f._id:
-                    strong_data = f(strong_data,data[1])[0]
-                    data = data[0]
-                else:
-                    strong_data = f(strong_data)
+                strong_data = f(strong_data)
             except Exception as e:
                 stack_info = traceback.format_exc()
                 logger.warning("fail to map batch transform [{}] "
