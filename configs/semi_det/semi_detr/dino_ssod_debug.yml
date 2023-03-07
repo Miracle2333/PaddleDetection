@@ -11,7 +11,7 @@ save_interval: 3600
 weights: output/semi_detr_semi005_size_600_1000/model_final
 find_unused_parameters: True
 save_dir: output
-log_iter: 50
+log_iter: 1
 ssod_method: DenseTeacher
 ### global config
 use_simple_ema: True
@@ -19,7 +19,7 @@ ema_decay: 0.9996
 use_gpu: true
 
 ### reader config
-worker_num: 4
+worker_num: 0
 
 SemiTrainReader:
   sample_transforms:
@@ -50,7 +50,7 @@ SemiTrainReader:
     - BboxXYXY2XYWH: {}
     - Permute: {}
   sup_batch_size: 2
-  unsup_batch_size: 2
+  unsup_batch_size: 4
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -78,8 +78,8 @@ TestReader:
   drop_last: false
 
 
-pretrain_student_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_cos_pretrained.pdparams
-pretrain_teacher_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_cos_pretrained.pdparams
+pretrain_student_weights: pp-dino_sup005_390.pdparams
+pretrain_teacher_weights: pp-dino_sup005_390.pdparams
 # pretrain_weights: pp-dino_sup005_390.pdparams
 architecture: DETR
 

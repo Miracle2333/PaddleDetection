@@ -113,6 +113,10 @@ class DETR_SSOD(MultiSteamDetector):
                     data_sup_s[k].extend(data_sup_w[k])
                 else:
                     data_sup_s[k] = paddle.concat([v,data_sup_w[k]])
+            print('***********unsup_w**************')
+            print(data_unsup_w)
+            print('***********unsup_s**************')
+            print(data_unsup_s)
             loss={}
             sup_loss = self.student(data_sup_s)
             sup_loss = {"sup_" + k: v for k, v in sup_loss.items()}
@@ -124,8 +128,10 @@ class DETR_SSOD(MultiSteamDetector):
         })
             unsup_loss = {"unsup_" + k: v for k, v in unsup_loss.items()}
             loss.update(**unsup_loss)     
-            
-            loss.update({'loss': loss['sup_loss'] + self.unsup_weight*loss.get('unsup_loss', 0)})
+            print(loss['sup_loss'] )
+            print(loss['unsup_loss'] )       
+            print(loss['sup_loss'] + loss['unsup_loss'])    
+            loss.update({'loss': loss['sup_loss'] + loss['unsup_loss'] })
         else:
             if iter_id==self.semi_start_iters-1:
                 print('********************')
@@ -203,8 +209,8 @@ class DETR_SSOD(MultiSteamDetector):
         losses = dict()
         for i in range(len(pseudo_bboxes)):
             if pseudo_labels[i].shape[0]==0:
-                pseudo_bboxes[i]=paddle.zeros([0,4]).numpy()
-                pseudo_labels[i]=paddle.zeros([0,1]).numpy()
+                pseudo_bboxes[i]=paddle.zeros([1,4]).numpy()
+                pseudo_labels[i]=paddle.zeros([1,1]).numpy()
             else:
                 pseudo_bboxes[i]=pseudo_bboxes[i][:,:4].numpy()
                 pseudo_labels[i]=pseudo_labels[i].unsqueeze(-1).numpy()
@@ -213,8 +219,25 @@ class DETR_SSOD(MultiSteamDetector):
             pseudo_bboxes[i]= paddle.to_tensor(pseudo_bboxes[i],dtype=paddle.float32,place=self.place)
         # print(pseudo_bboxes[0].shape[0])
         student_unsup.update({'gt_bbox':pseudo_bboxes,'gt_class':pseudo_labels})
-        
         # student_data.update(gt_bbox=pseudo_bboxes,gt_class=pseudo_labels)
+        pseudo_sum=0
+        for i in range(len(pseudo_bboxes)):
+            pseudo_sum+=pseudo_bboxes[i].sum()
+        # if pseudo_sum==0:
+        #     losses['loss'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_class'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_bbox'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_giou'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_class_aux'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_bbox_aux'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_giou_aux'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_class_dn'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_bbox_dn'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_giou_dn'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_class_aux_dn'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_bbox_aux_dn'] = paddle.zeros([1], dtype='float32')
+        #     losses['loss_giou_aux_dn'] = paddle.zeros([1], dtype='float32')
+        # else:
         body_feats=self.student.backbone(student_unsup)
         if self.student.neck is not None:
                 body_feats = self.student.neck(body_feats)
