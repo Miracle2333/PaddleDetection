@@ -25,10 +25,11 @@ import paddle.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 
 from ppdet.core.workspace import register, serializable
+from ppdet.modeling.ssod.utils import QFLv2
 from ..losses.iou_loss import GIoULoss
 from .utils import bbox_cxcywh_to_xyxy
 
-__all__ = ['HungarianMatcher']
+__all__ = ['HungarianMatcher','HungarianMatcherSemi']
 
 
 @register
@@ -107,6 +108,85 @@ class HungarianMatcher(nn.Layer):
             cost_class = -out_prob
 
         # Compute the L1 cost between boxes
+        cost_bbox = (
+            out_bbox.unsqueeze(1) - tgt_bbox.unsqueeze(0)).abs().sum(-1)
+
+        # Compute the giou cost betwen boxes
+        cost_giou = self.giou_loss(
+            bbox_cxcywh_to_xyxy(out_bbox.unsqueeze(1)),
+            bbox_cxcywh_to_xyxy(tgt_bbox.unsqueeze(0))).squeeze(-1)
+
+        # Final cost matrix
+        C = self.matcher_coeff['class'] * cost_class + self.matcher_coeff['bbox'] * cost_bbox + \
+            self.matcher_coeff['giou'] * cost_giou
+        C = C.reshape([bs, num_queries, -1])
+        C = [a.squeeze(0) for a in C.chunk(bs)]
+
+        sizes = [a.shape[0] for a in gt_bbox]
+        indices = [
+            linear_sum_assignment(c.split(sizes, -1)[i].numpy())
+            for i, c in enumerate(C)
+        ]
+        return [(paddle.to_tensor(
+            i, dtype=paddle.int64), paddle.to_tensor(
+                j, dtype=paddle.int64)) for i, j in indices]
+        
+        
+        
+@register
+@serializable
+class HungarianMatcherSemi(nn.Layer):
+
+    def __init__(self,
+                 matcher_coeff={'class': 2,
+                                'bbox': 5,
+                                'giou': 2},
+                 alpha=0.25,
+                 gamma=2.0):
+        r"""
+        Args:
+            matcher_coeff (dict): The coefficient of hungarian matcher cost.
+        """
+        super(HungarianMatcherSemi, self).__init__()
+        self.matcher_coeff = matcher_coeff
+        self.alpha = alpha
+        self.gamma = gamma
+
+        self.giou_loss = GIoULoss()
+
+    def forward(self, boxes, logits, gt_bbox, gt_class):
+        r"""
+        Args:
+            boxes (Tensor): [b, query, 4]
+            logits (Tensor): [b, query, num_classes]
+            gt_bbox (List(Tensor)): list[[n, 4]]
+            gt_class (List(Tensor)): list[[n, 1]]
+        Returns:
+            A list of size batch_size, containing tuples of (index_i, index_j) where:
+                - index_i is the indices of the selected predictions (in order)
+                - index_j is the indices of the corresponding selected targets (in order)
+            For each batch element, it holds:
+                len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
+        """
+        bs, num_queries = boxes.shape[:2]
+
+        num_gts = sum(len(a) for a in gt_class)
+        if num_gts == 0:
+            return [(paddle.to_tensor(
+                [], dtype=paddle.int64), paddle.to_tensor(
+                    [], dtype=paddle.int64)) for _ in range(bs)]
+
+        out_bbox = boxes.flatten(0, 1)
+        tgt_bbox = paddle.concat(gt_bbox)
+
+        logits=logits.reshape([-1,80]).unsqueeze(1).tile([1,num_gts,1])
+        logits=F.softmax(logits,axis=-1)
+        tgt_class = paddle.concat(gt_class).unsqueeze(0).tile([logits.shape[0],1,1])
+
+        cost_class =  QFLv2(
+                        logits,
+                        tgt_class,
+                        reduction='none').sum(-1)
         cost_bbox = (
             out_bbox.unsqueeze(1) - tgt_bbox.unsqueeze(0)).abs().sum(-1)
 

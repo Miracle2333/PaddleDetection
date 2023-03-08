@@ -81,33 +81,23 @@ def permute_to_N_HWA_K(tensor, K):
 
 def QFLv2(pred_sigmoid,
           teacher_sigmoid,
-          weight=None,
           beta=2.0,
-          reduction='mean'):
-    pt = pred_sigmoid
-    zerolabel = paddle.zeros_like(pt)
+          reduction='none'):
+    pt = teacher_sigmoid - pred_sigmoid
     loss = F.binary_cross_entropy(
-        pred_sigmoid, zerolabel, reduction='none') * pt.pow(beta)
-    pos = weight > 0
-
-    pt = teacher_sigmoid[pos] - pred_sigmoid[pos]
-    loss[pos] = F.binary_cross_entropy(
-        pred_sigmoid[pos], teacher_sigmoid[pos],
+        pred_sigmoid, teacher_sigmoid,
         reduction='none') * pt.pow(beta)
 
-    valid = weight >= 0
-    if reduction == "mean":
-        loss = loss[valid].mean()
-    elif reduction == "sum":
-        loss = loss[valid].sum()
     return loss
 
 
 
-def filter_invalid(bbox, label=None, score=None, mask=None, thr=0.0, min_size=0):
+
+def filter_invalid(bbox, label=None, score=None, thr=0.0, min_size=0):
     if score.numel() > 0:
         # valid = score > thr
-        valid = score >= thr
+        soft_score=score.max(-1)
+        valid = soft_score >= thr
         # if valid.shape[0] == 1 :
         #     bbox = bbox if valid.item() else paddle.expand(paddle.to_tensor([])[:, None], (-1, 4))
         # else:
@@ -118,11 +108,10 @@ def filter_invalid(bbox, label=None, score=None, mask=None, thr=0.0, min_size=0)
             #     label = label if valid.item() else paddle.to_tensor([])
             # else:
             label = label[valid]
+        score=score[valid]
         # bbox = bbox[valid]
         # if label is not None:
         #     label = label[valid]
-        if mask is not None:
-            mask = BitmapMasks(mask.masks[valid.cpu().numpy()], mask.height, mask.width)
     if min_size is not None and bbox.shape[0] > 0:
         bw = bbox[:, 2]
         bh = bbox[:, 3]
@@ -138,10 +127,9 @@ def filter_invalid(bbox, label=None, score=None, mask=None, thr=0.0, min_size=0)
             #     label = label if valid.item() else paddle.to_tensor([])
             # else:
             label = label[valid]
+            score=score[valid]
             
-        if mask is not None:
-            mask = BitmapMasks(mask.masks[valid.cpu().numpy()], mask.height, mask.width)
-    return bbox, label, mask
+    return bbox, label, score
 
 
 def weighted_loss(loss: dict, weight, ignore_keys=[], warmup=0):

@@ -34,7 +34,7 @@ from .deformable_transformer import MSDeformableAttention
 from ..initializer import (linear_init_, constant_, xavier_uniform_, normal_,
                            bias_init_with_prob)
 from .utils import (_get_clones, get_sine_pos_embed,
-                    get_contrastive_denoising_training_group, inverse_sigmoid)
+                    get_contrastive_denoising_training_group,get_contrastive_denoising_training_group_semi, inverse_sigmoid)
 
 __all__ = ['PPDETRTransformer']
 
@@ -363,21 +363,31 @@ class PPDETRTransformer(nn.Layer):
         ])
         return (feat_flatten, spatial_shapes, level_start_index)
 
-    def forward(self, feats, gt_meta=None,is_teacher=False):
+    def forward(self, feats, gt_meta=None,is_teacher=False,ssod=False):
         # input projection and embedding
         (memory, spatial_shapes,
          level_start_index) = self._get_encoder_input(feats)
 
         # prepare denoising training
         if self.training:
-            denoising_class, denoising_bbox_unact, attn_mask, dn_meta = \
-                get_contrastive_denoising_training_group(gt_meta,
-                                            self.num_classes,
-                                            self.num_queries,
-                                            self.denoising_class_embed.weight,
-                                            self.num_denoising,
-                                            self.label_noise_ratio,
-                                            self.box_noise_scale)
+            if ssod:
+                denoising_class, denoising_bbox_unact, attn_mask, dn_meta = \
+                    get_contrastive_denoising_training_group_semi(gt_meta,
+                                                self.num_classes,
+                                                self.num_queries,
+                                                self.denoising_class_embed.weight,
+                                                self.num_denoising,
+                                                self.label_noise_ratio,
+                                                self.box_noise_scale)
+            else:
+                denoising_class, denoising_bbox_unact, attn_mask, dn_meta = \
+                    get_contrastive_denoising_training_group(gt_meta,
+                                                self.num_classes,
+                                                self.num_queries,
+                                                self.denoising_class_embed.weight,
+                                                self.num_denoising,
+                                                self.label_noise_ratio,
+                                                self.box_noise_scale)
         else:
             denoising_class, denoising_bbox_unact, attn_mask, dn_meta = None, None, None, None
 

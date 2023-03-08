@@ -131,6 +131,107 @@ def get_valid_ratio(mask):
     return paddle.stack([valid_ratio_w, valid_ratio_h], -1)
 
 
+def get_contrastive_denoising_training_group_semi(targets,
+                                             num_classes,
+                                             num_queries,
+                                             class_embed,
+                                             num_denoising=100,
+                                             label_noise_ratio=0.5,
+                                             box_noise_scale=1.0):
+    if num_denoising <= 0:
+        return None, None, None, None
+    num_gts = [len(t) for t in targets["gt_class"]]
+    max_gt_num = max(num_gts)
+    if max_gt_num == 0:
+        return None, None, None, None
+
+    num_group = num_denoising // max_gt_num
+    num_group = 1 if num_group == 0 else num_group
+    # pad gt to max_num of a batch
+    bs = len(targets["gt_class"])
+    input_query_class = paddle.full(
+        [bs, max_gt_num,80], 0, dtype='float32')
+    input_query_bbox = paddle.zeros([bs, max_gt_num, 4])
+    pad_gt_mask = paddle.zeros([bs, max_gt_num])
+    for i in range(bs):
+        num_gt = num_gts[i]
+        if num_gt > 0:
+            input_query_class[i, :num_gt] = targets["gt_class"][i]
+            input_query_bbox[i, :num_gt] = targets["gt_bbox"][i]
+            pad_gt_mask[i, :num_gt] = 1
+    # each group has positive and negative queries.
+    input_query_class = input_query_class.tile([1, 2 * num_group]).reshape([input_query_class.shape[0],-1,80])
+    input_query_bbox = input_query_bbox.tile([1, 2 * num_group, 1])
+    pad_gt_mask = pad_gt_mask.tile([1, 2 * num_group])
+    # positive and negative mask
+    negative_gt_mask = paddle.zeros([bs, max_gt_num * 2, 1])
+    negative_gt_mask[:, max_gt_num:] = 1
+    negative_gt_mask = negative_gt_mask.tile([1, num_group, 1])
+    positive_gt_mask = 1 - negative_gt_mask
+    # contrastive denoising training positive index
+    positive_gt_mask = positive_gt_mask.squeeze(-1) * pad_gt_mask
+    dn_positive_idx = paddle.nonzero(positive_gt_mask)[:, 1]
+    dn_positive_idx = paddle.split(dn_positive_idx,
+                                   [n * num_group for n in num_gts])
+    # total denoising queries
+    num_denoising = int(max_gt_num * 2 * num_group)
+
+    if label_noise_ratio > 0:
+        input_query_class = input_query_class.flatten(0,1)
+        pad_gt_mask = pad_gt_mask.flatten()
+        # half of bbox prob
+        mask = paddle.rand([input_query_class.shape[0]]) < (label_noise_ratio * 0.5)
+        chosen_idx = paddle.nonzero(mask * pad_gt_mask).squeeze(-1)
+        # randomly put a new one here
+        new_label =paddle.to_tensor(input_query_class[chosen_idx].numpy()[:,paddle.randperm(80).numpy()])
+        input_query_class.scatter_(chosen_idx, new_label)
+        input_query_class.reshape_([bs, num_denoising,80])
+        pad_gt_mask.reshape_([bs, num_denoising])
+
+    if box_noise_scale > 0:
+        known_bbox = bbox_cxcywh_to_xyxy(input_query_bbox)
+
+        diff = paddle.tile(input_query_bbox[..., 2:] * 0.5,
+                           [1, 1, 2]) * box_noise_scale
+
+        rand_sign = paddle.randint_like(input_query_bbox, 0, 2) * 2.0 - 1.0
+        rand_part = paddle.rand(input_query_bbox.shape)
+        rand_part = (rand_part + 1.0) * negative_gt_mask + rand_part * (
+            1 - negative_gt_mask)
+        rand_part *= rand_sign
+        known_bbox += rand_part * diff
+        known_bbox.clip_(min=0.0, max=1.0)
+        input_query_bbox = bbox_xyxy_to_cxcywh(known_bbox)
+        input_query_bbox = inverse_sigmoid(input_query_bbox)
+
+    input_query_class = paddle.mm(input_query_class,class_embed)
+
+    tgt_size = num_denoising + num_queries
+    attn_mask = paddle.ones([tgt_size, tgt_size]) < 0
+    # match query cannot see the reconstruct
+    attn_mask[num_denoising:, :num_denoising] = True
+    # reconstruct cannot see each other
+    for i in range(num_group):
+        if i == 0:
+            attn_mask[max_gt_num * 2 * i:max_gt_num * 2 * (i + 1), max_gt_num *
+                      2 * (i + 1):num_denoising] = True
+        if i == num_group - 1:
+            attn_mask[max_gt_num * 2 * i:max_gt_num * 2 * (i + 1), :max_gt_num *
+                      i * 2] = True
+        else:
+            attn_mask[max_gt_num * 2 * i:max_gt_num * 2 * (i + 1), max_gt_num *
+                      2 * (i + 1):num_denoising] = True
+            attn_mask[max_gt_num * 2 * i:max_gt_num * 2 * (i + 1), :max_gt_num *
+                      2 * i] = True
+    attn_mask = ~attn_mask
+    dn_meta = {
+        "dn_positive_idx": dn_positive_idx,
+        "dn_num_group": num_group,
+        "dn_num_split": [num_denoising, num_queries]
+    }
+
+    return input_query_class, input_query_bbox, attn_mask, dn_meta
+
 def get_contrastive_denoising_training_group(targets,
                                              num_classes,
                                              num_queries,
@@ -236,7 +337,6 @@ def get_contrastive_denoising_training_group(targets,
     }
 
     return input_query_class, input_query_bbox, attn_mask, dn_meta
-
 
 def get_sine_pos_embed(pos_tensor,
                        num_pos_feats=128,
