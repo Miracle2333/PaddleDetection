@@ -243,4 +243,4 @@ TrainDatasetLM:
     data_fields: ['image', 'gt_bbox', 'gt_class']
     manual_length: 5000
 percent: 0.2
-label_match: True
+label_match: False

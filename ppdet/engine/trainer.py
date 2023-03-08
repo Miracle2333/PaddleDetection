@@ -217,10 +217,10 @@ class Trainer(object):
 
     def _init_callbacks(self):
         if self.mode == 'train':
-            if self.cfg.get('ssod_method', False):
-                self._callbacks = [SemiLogPrinter(self), SemiCheckpointer(self)]
             if self.cfg.get('label_match', False):
                 self._callbacks.append(LabelMatchCallback(self))
+            if self.cfg.get('ssod_method', False):
+                self._callbacks = [SemiLogPrinter(self), SemiCheckpointer(self)]
             else:
                 self._callbacks = [LogPrinter(self), Checkpointer(self)]
             if self.cfg.get('use_vdl', False):

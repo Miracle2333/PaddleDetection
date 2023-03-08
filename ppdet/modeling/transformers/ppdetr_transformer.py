@@ -363,7 +363,7 @@ class PPDETRTransformer(nn.Layer):
         ])
         return (feat_flatten, spatial_shapes, level_start_index)
 
-    def forward(self, feats, gt_meta=None,is_teacher=False):
+    def forward(self, feats,gt_meta=None,is_teacher=False):
         # input projection and embedding
         (memory, spatial_shapes,
          level_start_index) = self._get_encoder_input(feats)
