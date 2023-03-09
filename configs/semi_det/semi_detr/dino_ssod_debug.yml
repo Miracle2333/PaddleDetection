@@ -225,7 +225,7 @@ update_interval: 1000
 LMReader:
   sample_transforms:
     - Decode: {}
-    - Resize: {target_size: [320, 320], keep_ratio: False}
+    - Resize: {target_size: [640, 640], keep_ratio: False}
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
     - Permute: {}
   batch_size: 1
