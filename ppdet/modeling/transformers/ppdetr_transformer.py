@@ -372,7 +372,7 @@ class PPDETRTransformer(nn.Layer):
         if self.training:
             if ssod:
                 denoising_class, denoising_bbox_unact, attn_mask, dn_meta = \
-                    get_contrastive_denoising_training_group_semi(gt_meta,
+                    get_contrastive_denoising_training_group(gt_meta,
                                                 self.num_classes,
                                                 self.num_queries,
                                                 self.denoising_class_embed.weight,

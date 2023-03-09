@@ -274,11 +274,13 @@ class DETR_SSOD(MultiSteamDetector):
             gt_bbox=[]
             gt_class=[]
             images=[]
+            proposal_score=[]
             for i in range(len(pseudo_bboxes)):
                 if pseudo_labels[i].shape[0]==0:
                     continue
                 else:
-                    gt_class.append(proposal_score_list[i])
+                    proposal_score.append(proposal_score_list[i])
+                    gt_class.append(pseudo_labels[i])
                     gt_bbox.append(pseudo_bboxes[i])
                     images.append(student_unsup['image'][i])
             images=paddle.stack(images)
@@ -287,6 +289,7 @@ class DETR_SSOD(MultiSteamDetector):
             if self.student.neck is not None:
                     body_feats = self.student.neck(body_feats)
             out_transformer = self.student.transformer(body_feats,student_unsup,ssod=True)
+            student_unsup.update({'image':images,'gt_bbox':gt_bbox,'gt_class':proposal_score})
             losses = self.student.detr_head(out_transformer, body_feats, student_unsup,ssod=True)
         return losses
 
