@@ -37,6 +37,7 @@ from ppdet.data.transform.atss_assigner import bbox_overlaps
 from ppdet.utils.logger import setup_logger
 from ppdet.modeling.ssod.utils import filter_invalid, weighted_loss
 from .multi_stream_detector import MultiSteamDetector
+from ppdet.modeling.ssod.utils import Transform2D
 logger = setup_logger(__name__)
 
 __all__ = ['DETR_SSOD']
@@ -112,6 +113,8 @@ class DETR_SSOD(MultiSteamDetector):
                     continue
                 elif k in ['gt_class','gt_bbox','is_crowd']:
                     data_sup_s[k].extend(data_sup_w[k])
+                elif k in ['transform_matrix']:
+                    data_sup_s[k] = paddle.concat([v.astype('float32'),data_sup_w[k].astype('float32')])
                 else:
                     data_sup_s[k] = paddle.concat([v,data_sup_w[k]])
             # print('***********unsup_w**************')
@@ -206,9 +209,39 @@ class DETR_SSOD(MultiSteamDetector):
                 ]
             )
         )
-
+        bbox_transform_t=data_unsup_w['transform_matrix']
+        bbox_transform_s=data_unsup_s['transform_matrix']
+        Ms = Transform2D.get_trans_mat(bbox_transform_t, bbox_transform_s)
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
+        for i in range(1): 
+            teacher_bboxes[i]=box_cxcywh_to_xyxy(teacher_bboxes[i])*data_unsup_s['im_shape'][i][0]
+        im=np.uint8((data_unsup_w['image'][0].transpose((1,2,0))*255.0).numpy())
+        import cv2
+        cv2.imwrite('img_transform_befpre.jpg',im)
+        for m in range(len(teacher_bboxes[0])):
+            cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
+            cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+
+        cv2.imwrite('img_transform_before.jpg',im)            
+        for i in range(1):
+            teacher_bboxes[i] = self._transform_bbox(
+                        teacher_bboxes[i], # list b, [512,4]
+                        Ms[i], # list b, [3,3]
+                        data_unsup_s['image'].shape[2:4],
+                        )
+        
+        im=np.uint8((data_unsup_s['image'][0].transpose((1,2,0))*255.0).numpy())
+        import cv2
+        cv2.imwrite('img_transform.jpg',im)
+        for m in range(len(teacher_bboxes[0])):
+            cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
+            cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+
+        cv2.imwrite('img_transform.jpg',im)
+        for i in range(1): 
+            teacher_bboxes[i]=box_xyxy_to_cxcywh(teacher_bboxes[i])/data_unsup_s['im_shape'][i][0]
+        
         teacher_info=[teacher_bboxes,teacher_labels]
         student_unsup=data_unsup_s
         return self.compute_pseudo_label_loss(student_unsup, teacher_info)
@@ -277,9 +310,14 @@ class DETR_SSOD(MultiSteamDetector):
             body_feats=self.student.backbone(student_unsup)
             if self.student.neck is not None:
                     body_feats = self.student.neck(body_feats)
+            
             out_transformer = self.student.transformer(body_feats,student_unsup)
             losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
         return losses
+    
+    def _transform_bbox(self, bboxes, trans_mat, max_shape):
+        bboxes = Transform2D.transform_bboxes(bboxes, trans_mat, max_shape)
+        return bboxes
 
 
 

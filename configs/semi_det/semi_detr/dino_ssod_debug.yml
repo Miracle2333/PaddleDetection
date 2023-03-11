@@ -28,15 +28,17 @@ SemiTrainReader:
     - RandomExpand: {fill_value: [0., 0., 0.]}
     - RandomCrop: {prob: 0.8}
     - RandomFlip: {}
+    - Resize: {target_size: [640, 640], keep_ratio: False}
   weak_aug:
     - RandomFlip: {prob: 0.0}
   strong_aug:
+    - AutoAugment: {autoaug_type: strong}
     - StrongAugImage: {transforms: [
         RandomColorJitter: {prob: 0.8, brightness: 0.4, contrast: 0.4, saturation: 0.4, hue: 0.1},
         RandomErasingCrop: {},
         RandomGaussianBlur: {prob: 0.5, sigma: [0.1, 2.0]},
-        RandomGrayscale: {prob: 0.2},
-      ]}
+        RandomGrayscale: {prob: 0.2},]
+        }
   sup_batch_transforms:
     - BatchRandomResize: {target_size: [480, 512, 544, 576, 608, 640, 640, 640, 672, 704, 736, 768, 800], random_size: True, random_interp: True, keep_ratio: False}
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
@@ -49,8 +51,8 @@ SemiTrainReader:
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  sup_batch_size: 2
-  unsup_batch_size: 2
+  sup_batch_size: 1
+  unsup_batch_size: 1
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -78,8 +80,8 @@ TestReader:
   drop_last: false
 
 
-pretrain_student_weights: pp-dino_sup005_390.pdparams
-pretrain_teacher_weights: pp-dino_sup005_390.pdparams
+pretrain_student_weights: http://10.255.125.21:8084/pp-dino_sup005_390.pdparams
+pretrain_teacher_weights: http://10.255.125.21:8084/pp-dino_sup005_390.pdparams
 # pretrain_weights: pp-dino_sup005_390.pdparams
 architecture: DETR
 

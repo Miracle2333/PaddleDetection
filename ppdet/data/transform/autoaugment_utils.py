@@ -21,10 +21,11 @@ from __future__ import print_function
 
 import inspect
 import math
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter  
 import numpy as np
 import cv2
 from copy import deepcopy
+from ppdet.data.transform.geo_utils import GeometricTransformationBase as GTrans
 
 # This signifies the max integer that the controller RNN could predict for the
 # augmentation scheme.
@@ -147,6 +148,55 @@ def policy_v3():
     ]
     return policy
 
+def policy_soft():
+    """"Additional policy that performs well on object detection."""
+    # Each tuple is an augmentation operation of the form
+    # (operation, probability, magnitude). Each element in policy is a
+    # sub-policy that will be applied sequentially on the image.
+    transforms = []
+    policy1 = [
+            [('Identity', 1.0, 5)],
+    ]
+    transforms.append(policy1[np.random.choice(len(policy1))][0])
+    
+    policy2 = [
+            [('TranslateX_BBox', 1.0, 1)],
+            [('TranslateY_BBox', 1.0, 1)],
+            [('Rotate_BBox', 1.0, 10)],
+            [('ShearX_BBox', 1.0, 16)],
+            [('ShearY_BBox', 1.0, 1.6)],
+    ]
+    transforms.append(policy2[np.random.choice(len(policy2))][0])
+    # TODO:transform
+    # transforms = [('Color', 1.0, 10), ('Brightness', 1.0, 1)]
+    
+    policy_new = []
+    policy_new.append(transforms)
+    policy_new.append(transforms[::-1])
+
+    return policy_new
+
+
+def policy_soft_train():
+    """"Additional policy that performs well on object detection."""
+    # Each tuple is an augmentation operation of the form
+    # (operation, probability, magnitude). Each element in policy is a
+    # sub-policy that will be applied sequentially on the image.
+    transforms = []
+    policy1 = [
+            [('Identity', 1.0, 5)],
+            [('Color', 1.0, 4)],
+            [('Brightness', 1.0, 5)],
+            [('Sharpness', 1.0, 5)],
+            [('GaussianBlur', 1.0, 5)]
+    ]
+    transforms.append(policy1[np.random.choice(len(policy1))][0])
+
+    policy_new = []
+    policy_new.append(transforms)
+    policy_new.append(transforms[::-1])
+
+    return policy_new
 
 def _equal(val1, val2, eps=1e-8):
     return abs(val1 - val2) <= eps
@@ -193,6 +243,17 @@ def blend(image1, image2, factor):
     #
     # We need to clip and then cast.
     return np.clip(temp, a_min=0, a_max=255).astype(np.uint8)
+
+def identity(image, *args):
+    return image
+
+
+def gaussianBlur(img, *args):
+    sigma = np.random.uniform(0.1, 1.0)
+    # image = Image.fromarray(np.uint8(image))
+    image = Image.fromarray(np.uint8(img)).filter(ImageFilter.GaussianBlur(radius=sigma))
+    # image = image.filter(ImageFilter.GaussianBlur(radius=sigma))
+    return np.array(image)
 
 
 def cutout(image, pad_size, replace=0):
@@ -264,7 +325,7 @@ def solarize_add(image, addition=0, threshold=128):
     return np.where(image < threshold, added_image, image)
 
 
-def color(image, factor):
+def color(image, sample, factor, *args):
     """use cv2 to deal"""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     degenerate = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
@@ -273,11 +334,12 @@ def color(image, factor):
 
 # refer to https://github.com/4uiiurz1/pytorch-auto-augment/blob/024b2eac4140c38df8342f09998e307234cafc80/auto_augment.py#L197
 def contrast(img, factor):
-    img = ImageEnhance.Contrast(Image.fromarray(img)).enhance(factor)
+    image = Image.fromarray(np.uint8(img))
+    img = ImageEnhance.Contrast(image).enhance(factor)
     return np.array(img)
 
 
-def brightness(image, factor):
+def brightness(image, sample, factor):
     """Equivalent of PIL Brightness."""
     degenerate = np.zeros_like(image)
     return blend(degenerate, image, factor)
@@ -304,8 +366,9 @@ def rotate(image, degrees, replace):
         The rotated version of image.
     """
     image = wrap(image)
-    image = Image.fromarray(image)
-    image = image.rotate(degrees)
+    # image = Image.fromarray(image)
+    image = Image.fromarray(np.uint8(image))
+    image = image.rotate( degrees, fillcolor = (0,0,0) )
     image = np.array(image, dtype=np.uint8)
     return unwrap(image, replace)
 
@@ -830,7 +893,11 @@ def _rotate_bbox(bbox, image_height, image_width, degrees):
     return np.stack([min_y, min_x, max_y, max_x])
 
 
-def rotate_with_bboxes(image, bboxes, degrees, replace):
+def rotate_with_bboxes(image, bboxes, sample, degrees, replace):
+    h, w = image.shape[:2]
+    center = ((w - 1) * 0.5, (h - 1) * 0.5)
+    rotate_matrix = cv2.getRotationMatrix2D(center, degrees, 1)
+    GTrans.apply(sample, "rotate", cv2_rotation_matrix=rotate_matrix)
     # Rotate the image.
     image = rotate(image, degrees, replace)
 
@@ -847,15 +914,15 @@ def rotate_with_bboxes(image, bboxes, degrees, replace):
 
 def translate_x(image, pixels, replace):
     """Equivalent of PIL Translate in X dimension."""
-    image = Image.fromarray(wrap(image))
-    image = image.transform(image.size, Image.AFFINE, (1, 0, pixels, 0, 1, 0))
+    image = Image.fromarray(np.uint8(wrap(image)))
+    image = image.transform(image.size, Image.AFFINE, (1, 0, pixels, 0, 1, 0), fillcolor = (0,0,0))
     return unwrap(np.array(image), replace)
 
 
 def translate_y(image, pixels, replace):
     """Equivalent of PIL Translate in Y dimension."""
-    image = Image.fromarray(wrap(image))
-    image = image.transform(image.size, Image.AFFINE, (1, 0, 0, 0, 1, pixels))
+    image = Image.fromarray(np.uint8(wrap(image)))
+    image = image.transform(image.size, Image.AFFINE, (1, 0, 0, 0, 1, pixels), fillcolor = (0,0,0))
     return unwrap(np.array(image), replace)
 
 
@@ -900,7 +967,7 @@ def _shift_bbox(bbox, image_height, image_width, pixels, shift_horizontal):
     return np.stack([min_y, min_x, max_y, max_x])
 
 
-def translate_bbox(image, bboxes, pixels, replace, shift_horizontal):
+def translate_bbox(image, bboxes, sample, pixels, replace, shift_horizontal):
     """Equivalent of PIL Translate in X/Y dimension that shifts image and bbox.
 
     Args:
@@ -920,8 +987,10 @@ def translate_bbox(image, bboxes, pixels, replace, shift_horizontal):
     """
     if shift_horizontal:
         image = translate_x(image, pixels, replace)
+        GTrans.apply(sample, "shift", dx=-pixels, dy=0)
     else:
         image = translate_y(image, pixels, replace)
+        GTrans.apply(sample, "shift", dx=0, dy=-pixels)
 
     # Convert bbox coordinates to pixel values.
     image_height, image_width = image.shape[0], image.shape[1]
@@ -941,8 +1010,9 @@ def shear_x(image, level, replace):
     # with a matrix form of:
     # [1    level
     #    0    1].
-    image = Image.fromarray(wrap(image))
-    image = image.transform(image.size, Image.AFFINE, (1, level, 0, 0, 1, 0))
+    # image = Image.fromarray(wrap(image))
+    image = Image.fromarray(np.uint8(wrap(image)))
+    image = image.transform(image.size, Image.AFFINE, (1, level, 0, 0, 1, 0), fillcolor = (0,0,0))
     return unwrap(np.array(image), replace)
 
 
@@ -952,8 +1022,9 @@ def shear_y(image, level, replace):
     # with a matrix form of:
     # [1    0
     #    level    1].
-    image = Image.fromarray(wrap(image))
-    image = image.transform(image.size, Image.AFFINE, (1, 0, 0, level, 1, 0))
+    # image = Image.fromarray(wrap(image))
+    image = Image.fromarray(np.uint8(wrap(image)))
+    image = image.transform(image.size, Image.AFFINE, (1, 0, 0, level, 1, 0), fillcolor=(0,0,0))
     return unwrap(np.array(image), replace)
 
 
@@ -1004,7 +1075,7 @@ def _shear_bbox(bbox, image_height, image_width, level, shear_horizontal):
     return np.stack([min_y, min_x, max_y, max_x])
 
 
-def shear_with_bboxes(image, bboxes, level, replace, shear_horizontal):
+def shear_with_bboxes(image, bboxes, sample, level, replace, shear_horizontal):
     """Applies Shear Transformation to the image and shifts the bboxes.
 
     Args:
@@ -1025,8 +1096,10 @@ def shear_with_bboxes(image, bboxes, level, replace, shear_horizontal):
     """
     if shear_horizontal:
         image = shear_x(image, level, replace)
+        GTrans.apply(sample, "shear", magnitude=-level)
     else:
         image = shear_y(image, level, replace)
+        GTrans.apply(sample, "shear", magnitude=-level, direction="vertical")
 
     # Convert bbox coordinates to pixel values.
     image_height, image_width = image.shape[:2]
@@ -1079,7 +1152,7 @@ def autocontrast(image):
     return image
 
 
-def sharpness(image, factor):
+def sharpness(image, sample, factor):
     """Implements Sharpness function from PIL."""
     orig_image = image
     image = image.astype(np.float32)
@@ -1311,6 +1384,8 @@ def bbox_cutout(image, bboxes, pad_fraction, replace_with_mean):
 
 
 NAME_TO_FUNC = {
+        'Identity': identity,
+        'GaussianBlur': gaussianBlur,
         'AutoContrast': autocontrast,
         'Equalize': equalize,
         'Posterize': posterize,
@@ -1324,14 +1399,14 @@ NAME_TO_FUNC = {
         'BBox_Cutout': bbox_cutout,
         'Rotate_BBox': rotate_with_bboxes,
         # pylint:disable=g-long-lambda
-        'TranslateX_BBox': lambda image, bboxes, pixels, replace: translate_bbox(
-                image, bboxes, pixels, replace, shift_horizontal=True),
-        'TranslateY_BBox': lambda image, bboxes, pixels, replace: translate_bbox(
-                image, bboxes, pixels, replace, shift_horizontal=False),
-        'ShearX_BBox': lambda image, bboxes, level, replace: shear_with_bboxes(
-                image, bboxes, level, replace, shear_horizontal=True),
-        'ShearY_BBox': lambda image, bboxes, level, replace: shear_with_bboxes(
-                image, bboxes, level, replace, shear_horizontal=False),
+        'TranslateX_BBox': lambda image, bboxes, sample, pixels, replace: translate_bbox(
+                image, bboxes, sample, pixels, replace, shift_horizontal=True),
+        'TranslateY_BBox': lambda image, bboxes, sample, pixels, replace: translate_bbox(
+                image, bboxes, sample, pixels, replace, shift_horizontal=False),
+        'ShearX_BBox': lambda image, bboxes, sample, level, replace: shear_with_bboxes(
+                image, bboxes, sample, level, replace, shear_horizontal=True),
+        'ShearY_BBox': lambda image, bboxes, sample, level, replace: shear_with_bboxes(
+                image, bboxes, sample, level, replace, shear_horizontal=False),
         # pylint:enable=g-long-lambda
         'Rotate_Only_BBoxes': rotate_only_bboxes,
         'ShearX_Only_BBoxes': shear_x_only_bboxes,
@@ -1357,6 +1432,11 @@ def _rotate_level_to_arg(level):
     level = _randomly_negate_tensor(level)
     return (level, )
 
+def _rand_rotate_level_to_arg(level):
+    level = np.random.random() * level
+    level = _randomly_negate_tensor(level)
+    return (level, )
+
 
 def _shrink_level_to_arg(level):
     """Converts level to ratio by which we shrink the image content."""
@@ -1377,6 +1457,12 @@ def _shear_level_to_arg(level):
     level = _randomly_negate_tensor(level)
     return (level, )
 
+def _rand_shear_level_to_arg(level):
+    level = (level / _MAX_LEVEL) * 0.3
+    level = np.random.random() * level
+    # Flip level to negative with 50% chance.
+    level = _randomly_negate_tensor(level)
+    return (level, )
 
 def _translate_level_to_arg(level, translate_const):
     level = (level / _MAX_LEVEL) * float(translate_const)
@@ -1384,6 +1470,12 @@ def _translate_level_to_arg(level, translate_const):
     level = _randomly_negate_tensor(level)
     return (level, )
 
+def _rand_translate_level_to_arg(level, translate_const):
+    level = (level / _MAX_LEVEL) * float(translate_const)
+    level = np.random.random() * level
+    # Flip level to negative with 50% chance.
+    level = _randomly_negate_tensor(level)
+    return (level, )
 
 def _bbox_cutout_level_to_arg(level, hparams):
     cutout_pad_fraction = (level /
@@ -1393,6 +1485,8 @@ def _bbox_cutout_level_to_arg(level, hparams):
 
 def level_to_arg(hparams):
     return {
+        'Identity': lambda level: (),
+        'GaussianBlur': lambda level: (),
         'AutoContrast': lambda level: (),
         'Equalize': lambda level: (),
         'Posterize': lambda level: (int((level / _MAX_LEVEL) * 4), ),
@@ -1407,13 +1501,14 @@ def level_to_arg(hparams):
         # pylint:disable=g-long-lambda
         'BBox_Cutout': lambda level: _bbox_cutout_level_to_arg(level, hparams),
         'TranslateX_BBox':
-        lambda level: _translate_level_to_arg(level, 250),  # hparams.translate_const=250
+        lambda level: _rand_translate_level_to_arg(level, 250),  # hparams.translate_const=250
         'TranslateY_BBox':
-        lambda level: _translate_level_to_arg(level, 250),  # hparams.translate_cons
+        lambda level: _rand_translate_level_to_arg(level, 250),  # hparams.translate_cons
         # pylint:enable=g-long-lambda
-        'ShearX_BBox': _shear_level_to_arg,
-        'ShearY_BBox': _shear_level_to_arg,
-        'Rotate_BBox': _rotate_level_to_arg,
+        'ShearX_BBox': _rand_shear_level_to_arg,
+        'ShearY_BBox': _rand_shear_level_to_arg,
+        # 'Rotate_BBox': _rotate_level_to_arg,
+        'Rotate_BBox': _rand_rotate_level_to_arg,
         'Rotate_Only_BBoxes': _rotate_level_to_arg,
         'ShearX_Only_BBoxes': _shear_level_to_arg,
         'ShearY_Only_BBoxes': _shear_level_to_arg,
@@ -1468,7 +1563,7 @@ def _parse_policy_info(name, prob, level, replace_value, augmentation_hparams):
     return (func, prob, args)
 
 
-def _apply_func_with_prob(func, image, args, prob, bboxes):
+def _apply_func_with_prob(func, image, args, prob, bboxes, sample):
     """Apply `func` to image w/ `args` as input with probability `prob`."""
     assert isinstance(args, tuple)
     assert 'bboxes' == inspect.getfullargspec(func)[0][1]
@@ -1479,7 +1574,8 @@ def _apply_func_with_prob(func, image, args, prob, bboxes):
         prob = 1.0
 
     # Apply the function with probability `prob`.
-    should_apply_op = np.floor(np.random.rand() + 0.5) >= 1
+    should_apply_op = np.floor(np.random.rand() + 1) >= 1
+    args = (sample, ) + args
     if should_apply_op:
         augmented_image, augmented_bboxes = func(image, bboxes, *args)
     else:
@@ -1487,17 +1583,17 @@ def _apply_func_with_prob(func, image, args, prob, bboxes):
     return augmented_image, augmented_bboxes
 
 
-def select_and_apply_random_policy(policies, image, bboxes):
+def select_and_apply_random_policy(policies, image, bboxes, sample):
     """Select a random policy from `policies` and apply it to `image`."""
     policy_to_select = np.random.randint(0, len(policies), dtype=np.int32)
     # policy_to_select = 6 # for test
     for (i, policy) in enumerate(policies):
         if i == policy_to_select:
-            image, bboxes = policy(image, bboxes)
+            image, bboxes = policy(image, bboxes, sample)
     return (image, bboxes)
 
 
-def build_and_apply_nas_policy(policies, image, bboxes, augmentation_hparams):
+def build_and_apply_nas_policy(policies, image, bboxes, sample, augmentation_hparams):
     """Build a policy from the given policies passed in and apply to image.
 
     Args:
@@ -1534,24 +1630,22 @@ def build_and_apply_nas_policy(policies, image, bboxes, augmentation_hparams):
         # Now build the tf policy that will apply the augmentation procedue
         # on image.
         def make_final_policy(tf_policy_):
-            def final_policy(image_, bboxes_):
+            def final_policy(image_, bboxes_, sample_):
                 for func, prob, args in tf_policy_:
-                    image_, bboxes_ = _apply_func_with_prob(func, image_, args,
-                                                            prob, bboxes_)
+                    image_, bboxes_ = _apply_func_with_prob(func, image_, args, prob, bboxes_, sample_)
                 return image_, bboxes_
 
             return final_policy
 
         tf_policies.append(make_final_policy(tf_policy))
 
-    augmented_images, augmented_bboxes = select_and_apply_random_policy(
-        tf_policies, image, bboxes)
+    augmented_images, augmented_bboxes = select_and_apply_random_policy(tf_policies, image, bboxes, sample)
     # If no bounding boxes were specified, then just return the images.
     return (augmented_images, augmented_bboxes)
 
 
 # TODO(barretzoph): Add in ArXiv link once paper is out.
-def distort_image_with_autoaugment(image, bboxes, augmentation_name):
+def distort_image_with_autoaugment(image, bboxes, sample, augmentation_name):
     """Applies the AutoAugment policy to `image` and `bboxes`.
 
     Args:
@@ -1574,6 +1668,8 @@ def distort_image_with_autoaugment(image, bboxes, augmentation_name):
         'v1': policy_v1,
         'v2': policy_v2,
         'v3': policy_v3,
+        'strong': policy_soft,
+        'weak': policy_soft_train,
         'test': policy_vtest
     }
     if augmentation_name not in available_policies:
@@ -1582,5 +1678,4 @@ def distort_image_with_autoaugment(image, bboxes, augmentation_name):
 
     policy = available_policies[augmentation_name]()
     augmentation_hparams = {}
-    return build_and_apply_nas_policy(policy, image, bboxes,
-                                      augmentation_hparams)
+    return build_and_apply_nas_policy(policy, image, bboxes, sample, augmentation_hparams)

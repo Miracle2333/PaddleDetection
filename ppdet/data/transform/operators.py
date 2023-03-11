@@ -43,7 +43,7 @@ MUTEX = threading.Lock()
 import paddle
 from ppdet.core.workspace import serializable
 from ..reader import Compose
-
+from ppdet.data.transform.geo_utils import GeometricTransformationBase as GTrans
 from .op_helper import (satisfy_sample_constraint, filter_and_process,
                         generate_sample_bbox, clip_bbox, data_anchor_sampling,
                         satisfy_sample_constraint_coverage, crop_image_sampling,
@@ -726,34 +726,42 @@ class AutoAugment(BaseOperator):
         Learning Data Augmentation Strategies for Object Detection, see https://arxiv.org/abs/1906.11172
         """
         im = sample['image']
-        gt_bbox = sample['gt_bbox']
         if not isinstance(im, np.ndarray):
             raise TypeError("{}: image is not a numpy array.".format(self))
         if len(im.shape) != 3:
             raise ImageError("{}: image is not 3-dimensional.".format(self))
-        if len(gt_bbox) == 0:
-            return sample
-
+        # if len(gt_bbox) == 0:
+        #     return sample
         height, width, _ = im.shape
-        norm_gt_bbox = np.ones_like(gt_bbox, dtype=np.float32)
-        norm_gt_bbox[:, 0] = gt_bbox[:, 1] / float(height)
-        norm_gt_bbox[:, 1] = gt_bbox[:, 0] / float(width)
-        norm_gt_bbox[:, 2] = gt_bbox[:, 3] / float(height)
-        norm_gt_bbox[:, 3] = gt_bbox[:, 2] / float(width)
+        if 'gt_bbox' in sample.keys():
+            gt_bbox = sample['gt_bbox']
+            norm_gt_bbox = np.ones_like(gt_bbox, dtype=np.float32)
+            norm_gt_bbox[:, 0] = gt_bbox[:, 1] / float(height)
+            norm_gt_bbox[:, 1] = gt_bbox[:, 0] / float(width)
+            norm_gt_bbox[:, 2] = gt_bbox[:, 3] / float(height)
+            norm_gt_bbox[:, 3] = gt_bbox[:, 2] / float(width)
 
-        from .autoaugment_utils import distort_image_with_autoaugment
-        im, norm_gt_bbox = distort_image_with_autoaugment(im, norm_gt_bbox,
-                                                          self.autoaug_type)
+            from .autoaugment_utils import distort_image_with_autoaugment
+            im, norm_gt_bbox = distort_image_with_autoaugment(im, norm_gt_bbox, sample, self.autoaug_type)
 
-        gt_bbox[:, 0] = norm_gt_bbox[:, 1] * float(width)
-        gt_bbox[:, 1] = norm_gt_bbox[:, 0] * float(height)
-        gt_bbox[:, 2] = norm_gt_bbox[:, 3] * float(width)
-        gt_bbox[:, 3] = norm_gt_bbox[:, 2] * float(height)
+            gt_bbox[:, 0] = norm_gt_bbox[:, 1] * float(width)
+            gt_bbox[:, 1] = norm_gt_bbox[:, 0] * float(height)
+            gt_bbox[:, 2] = norm_gt_bbox[:, 3] * float(width)
+            gt_bbox[:, 3] = norm_gt_bbox[:, 2] * float(height)
 
-        sample['image'] = im
-        sample['gt_bbox'] = gt_bbox
+            sample['gt_bbox'] = gt_bbox
+            for m in range(len(gt_bbox)):
+                cv2.rectangle(im, (int(gt_bbox[m][0]), int(gt_bbox[m][1])), (int(gt_bbox[m][2]), int(gt_bbox[m][3])), color=(255,0,255), thickness=2)
+                cv2.putText(np.uint8(im),  str(sample['gt_class'][m]),(int(gt_bbox[m][0]),int(gt_bbox[m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+
+            cv2.imwrite('img.jpg',im)
+        else:
+            norm_gt_bbox =np.ones([1,4], dtype=np.float32)
+            from .autoaugment_utils import distort_image_with_autoaugment
+            im, norm_gt_bbox = distort_image_with_autoaugment(im, norm_gt_bbox, sample, self.autoaug_type)
+            cv2.imwrite('img.jpg',im)
+        sample['image']=im
         return sample
-
 
 @register_op
 class RandomFlip(BaseOperator):
@@ -821,6 +829,10 @@ class RandomFlip(BaseOperator):
             sample: the image, bounding box and segmentation part
                     in sample are flipped.
         """
+        GTrans.apply(
+                    sample,
+                    "identity",
+                )
         if np.random.uniform(0, 1) < self.prob:
             im = sample['image']
             height, width = im.shape[:2]
@@ -840,8 +852,22 @@ class RandomFlip(BaseOperator):
             if 'gt_segm' in sample and sample['gt_segm'].any():
                 sample['gt_segm'] = sample['gt_segm'][:, :, ::-1]
 
+            if 'gt_rbox2poly' in sample and sample['gt_rbox2poly'].any():
+                sample['gt_rbox2poly'] = self.apply_rbox(sample['gt_rbox2poly'],
+                                                         width)
+
             sample['flipped'] = True
             sample['image'] = im
+        else:
+            sample['flipped'] = False
+
+        if sample['flipped']:
+            GTrans.apply(
+                    sample,
+                    "flip",
+                    direction='horizontal',
+                    shape=sample["image"].shape[:2],
+                )
         return sample
 
 
@@ -1001,7 +1027,7 @@ class Resize(BaseOperator):
         else:
             sample['scale_factor'] = np.asarray(
                 [im_scale_y, im_scale_x], dtype=np.float32)
-
+        GTrans.apply(sample, "scale", sx=sample['scale_factor'][0], sy=sample['scale_factor'][1])
         # apply bbox
         if 'gt_bbox' in sample and len(sample['gt_bbox']) > 0:
             sample['gt_bbox'] = self.apply_bbox(sample['gt_bbox'],
