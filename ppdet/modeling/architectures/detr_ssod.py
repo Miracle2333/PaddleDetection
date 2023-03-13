@@ -132,7 +132,7 @@ class DETR_SSOD(MultiSteamDetector):
             sup_loss = {"sup_" + k: v for k, v in sup_loss.items()}
 
             loss.update(**sup_loss)   
-            unsup_loss, images_drawn =  self.foward_unsup_train(data_unsup_w, data_unsup_s)
+            unsup_loss, images_vis =  self.foward_unsup_train(data_unsup_w, data_unsup_s)
             unsup_loss.update({
             'loss':
             paddle.add_n([v for k, v in unsup_loss.items() if 'log' not in k])
@@ -153,11 +153,7 @@ class DETR_SSOD(MultiSteamDetector):
             sup_loss=self.student(inputs)
             sup_loss = {k: v for k, v in sup_loss.items()}
             loss.update(**sup_loss)      
-
-        outputs = {}
-        outputs["losses"] = loss
-        outputs["images_vis"] = images_drawn
-        return outputs
+        return loss, images_vis
 
     def foward_unsup_train(self, data_unsup_w, data_unsup_s):
 
@@ -221,7 +217,10 @@ class DETR_SSOD(MultiSteamDetector):
 
         pseudo_bboxes=list(teacher_info[0])
         pseudo_labels=list(teacher_info[1])
-        images_drawn = self.get_vis_pseudo_box(student_unsup, pseudo_bboxes, pseudo_labels)
+        try:
+            images_vis = self.get_vis_pseudo_box(student_unsup, pseudo_bboxes, pseudo_labels)
+        except:
+            a = 1
 
         losses = dict()
         for i in range(len(pseudo_bboxes)):
@@ -285,37 +284,37 @@ class DETR_SSOD(MultiSteamDetector):
                     body_feats = self.student.neck(body_feats)
             out_transformer = self.student.transformer(body_feats,student_unsup)
             losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
-        return losses, images_drawn
+        return losses, images_vis
 
     def get_vis_pseudo_box(self, batch_im, pseudo_bboxes, pseudo_labels):
         #batch_im = batch_im_tensor.numpy()
-        im_ids = batch_im["im_id"].numpy()
-        images = batch_im["image"].numpy()
-        im_shapes = batch_im['im_shape'].numpy()
-        
-        images_drawn = []
-        return images_drawn
+        im_ids = batch_im["im_id"].detach().numpy()
+        images = batch_im["image"].detach().numpy()
+        im_shapes = batch_im['im_shape'].detach().numpy()
+        #batch_im = batch_im.detach()
+        images_vis = []
+       
         for i in range(len(pseudo_bboxes)):
             pseudo_bbox = pseudo_bboxes[i]
-            pseudo_bbox = box_cxcywh_to_xyxy(pseudo_bbox)
-            pseudo_bbox = pseudo_bbox.numpy()
+            #pseudo_bbox = box_cxcywh_to_xyxy(pseudo_bbox.detach())
+            #return images_drawn
+            pseudo_bbox = pseudo_bbox.detach().numpy()
             im_id = im_ids[i,:]
             im_shape = im_shapes[i,:]
             image = (np.transpose(images[i,:,:,:], (1, 2, 0)) * 255).astype(np.uint8) # CHW to HWC
             image = image.copy()
             for j in range(pseudo_bbox.shape[0]):
                 box = pseudo_bbox[j,:]
-                x1, y1, x2, y2 = box[:] 
+                x, y, w, h = box[:]
+                x1, x2 = x - w / 2.0, x + w / 2.0
+                y1, y2 = y - h / 2.0, y + h / 2.0 
                 x1 *= im_shape[1]
                 x2 *= im_shape[1]
                 y1 *= im_shape[0]
                 y2 *= im_shape[0]
                 cv2.rectangle(image, (int(x1),int(y1)), (int(x2),int(y2)), (0,255,0), 2)
-            images_drawn.append(image)
-        return images_drawn
-
-
-
+            images_vis.append(image)
+        return images_vis
 
 def box_cxcywh_to_xyxy(x):
     x_c, y_c, w, h = x.unbind(-1)

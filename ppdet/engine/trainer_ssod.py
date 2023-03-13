@@ -272,9 +272,8 @@ class Trainer_DenseTeacher(Trainer):
                     scaled_loss.backward()
                     scaler.minimize(self.optimizer, scaled_loss)
                 else:
-                    outputs = model(data)
-                    output_loss, images_vis = outputs["losses"], outputs["images_vis"]                    
-                    loss = output_loss["loss"]
+                    outputs, images_vis = model(data)
+                    loss = outputs['loss']
                     # model backward
                     loss.backward()
                     self.optimizer.step()
@@ -290,7 +289,8 @@ class Trainer_DenseTeacher(Trainer):
                 # self.check_gradient()
                 self.status['learning_rate'] = curr_lr
                 if self._nranks < 2 or self._local_rank == 0:
-                    self.status['training_staus'].update(output_loss)
+                    self.status['training_staus'].update(outputs)
+                    self.status['images_pseduo_label'] = images_vis
 
                 self.status['batch_time'].update(time.time() - iter_tic)
 

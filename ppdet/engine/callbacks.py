@@ -15,6 +15,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+import enum
 
 import os
 import sys
@@ -283,6 +284,11 @@ class VisualDLWriter(Callback):
                 for loss_name, loss_value in training_staus.get().items():
                     self.vdl_writer.add_scalar(loss_name, loss_value,
                                                self.vdl_loss_step)
+                for i, image in enumerate(status['images_pseduo_label']):
+                    self.vdl_writer.add_image(
+                    "pseduo/frame_{}".format(i), image,
+                    self.vdl_loss_step)
+
                 self.vdl_loss_step += 1
             elif mode == 'test':
                 ori_image = status['original_image']

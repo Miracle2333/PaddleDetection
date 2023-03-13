@@ -49,8 +49,8 @@ SemiTrainReader:
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  sup_batch_size: 1
-  unsup_batch_size: 1
+  sup_batch_size: 2
+  unsup_batch_size: 2
   shuffle: true
   drop_last: true
   collate_batch: false
