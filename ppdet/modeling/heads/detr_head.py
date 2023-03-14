@@ -398,7 +398,8 @@ class DINOHead(nn.Layer):
                 inputs['gt_class'],
                 dn_out_bboxes=dn_out_bboxes,
                 dn_out_logits=dn_out_logits,
-                dn_meta=dn_meta)
+                dn_meta=dn_meta,
+                gt_score = inputs['gt_score'] if 'gt_score' in inputs.keys() else None)
         else:
             return (dec_out_bboxes[self.eval_idx],
                     dec_out_logits[self.eval_idx], None)

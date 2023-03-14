@@ -267,10 +267,24 @@ def varifocal_loss_with_logits(pred_logits,
                                label,
                                normalizer=1.0,
                                alpha=0.75,
-                               gamma=2.0):
+                               gamma=2.0,
+                                ):
     pred_score = F.sigmoid(pred_logits)
     weight = alpha * pred_score.pow(gamma) * (1 - label) + gt_score * label
     loss = F.binary_cross_entropy_with_logits(
         pred_logits, gt_score, weight=weight, reduction='none')
+    indicator_matrix=[]
+    for i in range(len(gt_score)):
+        
+        for i in range(len(label)):
+            if label[i].sum()>0:
+                indicator_matrix.append(paddle.ones([1, loss.shape[1], loss.shape[-1]]))
+            else:
+                indicator_matrix.append(paddle.zeros([1, loss.shape[1], loss.shape[-1]]))
+    indicator_matrix=paddle.concat(indicator_matrix)
+        # indicator_matrix = paddle.cat([i * paddle.ones(1, loss.shape[1], loss.shape[-1]) for i in label])
+        # indicator_matrix = indicator_matrix.cuda()
+    loss = loss * indicator_matrix
+        
     return loss.mean(1).sum() / normalizer
 
