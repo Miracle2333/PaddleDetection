@@ -22,6 +22,8 @@ from functools import partial
 
 import numpy as np
 import paddle
+from collections import Counter
+from copy import deepcopy
 from six.moves import map, zip
 
 
@@ -101,6 +103,16 @@ def QFLv2(pred_sigmoid,
     elif reduction == "sum":
         loss = loss[valid].sum()
     return loss
+
+def gen_pesudo_labels(preds, mask=None, thr=0.0, min_size=0):
+    bbox = preds[:, :, 2:]
+    label = preds[:, :, 0]
+    scores = preds[:, :, 1]
+
+    #pseudo_counter = Counter(selected_label.tolist())
+
+    return [], []
+
 
 
 

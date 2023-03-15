@@ -8,7 +8,7 @@ _BASE_: [
 #for debug
 eval_interval: 3630
 save_interval: 3630
-weights: output/semi_detr_semi005_size_600_1000/model_final
+weights: output/semi_dino_thres/model_final
 find_unused_parameters: True
 save_dir: output
 log_iter: 50

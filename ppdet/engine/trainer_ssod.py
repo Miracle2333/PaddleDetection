@@ -248,6 +248,7 @@ class Trainer_DenseTeacher(Trainer):
                 data_sup_w, data_sup_s, data_unsup_w, data_unsup_s = data
                 data_sup_w['epoch_id'] = epoch_id
                 data_sup_s['epoch_id'] = epoch_id
+                data_unsup_w['iter_per_epoch'] = len(self.loader)
                 data_unsup_w['epoch_id'] = epoch_id
                 data_unsup_s['epoch_id'] = epoch_id
                 data=[data_sup_w, data_sup_s, data_unsup_w, data_unsup_s] 

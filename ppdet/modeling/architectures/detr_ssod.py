@@ -24,6 +24,7 @@ import paddle
 import os
 
 import numpy as np
+import math
 from operator import itemgetter
 import paddle
 import paddle.nn.functional as F
@@ -35,7 +36,7 @@ from ppdet.core.workspace import register, create
 from ppdet.modeling.bbox_utils import delta2bbox
 from ppdet.data.transform.atss_assigner import bbox_overlaps
 from ppdet.utils.logger import setup_logger
-from ppdet.modeling.ssod.utils import filter_invalid, weighted_loss
+from ppdet.modeling.ssod.utils import filter_invalid, weighted_loss, gen_pesudo_labels
 from .multi_stream_detector import MultiSteamDetector
 logger = setup_logger(__name__)
 
@@ -53,6 +54,9 @@ class DETR_SSOD(MultiSteamDetector):
         self.momentum=0.9996
         self.cls_thr=None
         self.cls_thr_ig=None
+        self.cur_iter = 0
+        self.iter_per_epoch = 0
+        self.total_iter = 0
         # self.id=0
         if train_cfg is not None:
             self.freeze("teacher")
@@ -95,6 +99,9 @@ class DETR_SSOD(MultiSteamDetector):
                 print('******semi start*******')
                 print('***********************')
             data_sup_w, data_sup_s, data_unsup_w, data_unsup_s,_=inputs
+            self.iter_per_epoch = data_unsup_w['iter_per_epoch']
+            self.total_iter = self.iter_per_epoch * self.train_cfg['epoch']
+            self.cur_iter = iter_id
             
             if data_sup_w['image'].shape != data_sup_s['image'].shape:
                 data_sup_w, data_sup_s = align_weak_strong_shape(data_sup_w,data_sup_s)
@@ -170,26 +177,31 @@ class DETR_SSOD(MultiSteamDetector):
             bbox_num=paddle.tile(paddle.to_tensor([bbox_num]), [bs])
         self.place=body_feats[0].place
 
-
         bboxes=paddle.concat([label,score,bbox],axis=-1).reshape([-1,6])
         # print(score.max())    
         if bboxes.numel() > 0:
             proposal_list = paddle.concat([bboxes[:,2:], bboxes[:,1:2]], axis=-1)
+            
             proposal_list = proposal_list.split(tuple(np.array(bbox_num)), 0)
         else:
             proposal_list = [paddle.expand(paddle.to_tensor([])[:, None], (-1, 5),place=self.place)]
         
         proposal_label_list = paddle.cast(bboxes[:, 0], np.int32)
         proposal_label_list = proposal_label_list.split(tuple(np.array(bbox_num)), 0)
+
+        score_list = paddle.concat([bboxes[:,1:2]], axis=-1)
+        score_list = score_list.split(tuple(np.array(bbox_num)), 0)
             
         proposal_list = [paddle.to_tensor(p, place=self.place) for p in proposal_list]
         proposal_label_list = [paddle.to_tensor(p, place=self.place) for p in proposal_label_list]
 
         if isinstance(self.train_cfg['pseudo_label_initial_score_thr'], float):
-            thr = self.train_cfg['pseudo_label_initial_score_thr']
+            thr = self.update_thres()
         else:
             # TODO: use dynamic threshold
-            raise NotImplementedError("Dynamic Threshold is not implemented yet.") 
+            raise NotImplementedError("Dynamic Threshold is not implemented yet.")
+        #preds = paddle.concat([label,score,bbox], axis=-1)
+        #proposal_list, proposal_label_list = gen_pesudo_labels(preds, thr, min_size=self.train_cfg['min_pseduo_box_size'])
         proposal_list, proposal_label_list, _ = list(
             zip(
                 *[
@@ -272,8 +284,6 @@ class DETR_SSOD(MultiSteamDetector):
                     images.append(student_unsup['image'][i])
             images=paddle.stack(images)
             student_unsup.update({'image':images,'gt_bbox':gt_bbox,'gt_class':gt_class})
-            
-            
             body_feats=self.student.backbone(student_unsup)
             if self.student.neck is not None:
                     body_feats = self.student.neck(body_feats)
@@ -281,7 +291,11 @@ class DETR_SSOD(MultiSteamDetector):
             losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
         return losses
 
-
+    def update_thres(self):
+        min_thres = self.train_cfg['pseudo_label_final_score_thr']
+        max_thres = self.train_cfg['pseudo_label_initial_score_thr']
+        thres = min_thres + 0.5 * (max_thres - min_thres) * (1.0 + math.cos(self.cur_iter / self.total_iter * math.pi))
+        return thres
 
 
 def box_cxcywh_to_xyxy(x):
