@@ -111,7 +111,7 @@ class DETR_SSOD(MultiSteamDetector):
             for k, v in data_sup_s.items():
                 if k in ['epoch_id']:
                     continue
-                elif k in ['gt_class','gt_bbox','is_crowd']:
+                elif k in ['gt_class','gt_bbox','is_crowd','aug']:
                     data_sup_s[k].extend(data_sup_w[k])
                 elif k in ['transform_matrix']:
                     data_sup_s[k] = paddle.concat([v.astype('float32'),data_sup_w[k].astype('float32')])
@@ -214,33 +214,36 @@ class DETR_SSOD(MultiSteamDetector):
         Ms = Transform2D.get_trans_mat(bbox_transform_t, bbox_transform_s)
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
-        for i in range(1): 
-            teacher_bboxes[i]=box_cxcywh_to_xyxy(teacher_bboxes[i])*data_unsup_s['im_shape'][i][0]
-        im=np.uint8((data_unsup_w['image'][0].transpose((1,2,0))*255.0).numpy())
-        import cv2
-        cv2.imwrite('img_transform_befpre.jpg',im)
-        for m in range(len(teacher_bboxes[0])):
-            cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
-            cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+        for i in range(data_unsup_s['image'].shape[0]):
+            if teacher_bboxes[i].sum()==0:
+                teacher_bboxes[i]=teacher_bboxes[i]
+            else:
+                teacher_bboxes[i]=box_cxcywh_to_xyxy(teacher_bboxes[i])*data_unsup_s['im_shape'][i][0]
+                # im=np.uint8((data_unsup_w['image'][0].transpose((1,2,0))*255.0).numpy())
+                # import cv2
+                # cv2.imwrite('img_transform_before.jpg',im)
+                # for m in range(len(teacher_bboxes[0])):
+                #     cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
+                #     cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
 
-        cv2.imwrite('img_transform_before.jpg',im)            
-        for i in range(1):
-            teacher_bboxes[i] = self._transform_bbox(
-                        teacher_bboxes[i], # list b, [512,4]
-                        Ms[i], # list b, [3,3]
-                        data_unsup_s['image'].shape[2:4],
-                        )
-        
-        im=np.uint8((data_unsup_s['image'][0].transpose((1,2,0))*255.0).numpy())
-        import cv2
-        cv2.imwrite('img_transform.jpg',im)
-        for m in range(len(teacher_bboxes[0])):
-            cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
-            cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+                # cv2.imwrite('img_transform_before.jpg',im)            
 
-        cv2.imwrite('img_transform.jpg',im)
-        for i in range(1): 
-            teacher_bboxes[i]=box_xyxy_to_cxcywh(teacher_bboxes[i])/data_unsup_s['im_shape'][i][0]
+                teacher_bboxes[i] = self._transform_bbox(
+                            teacher_bboxes[i], # list b, [512,4]
+                            Ms[i], # list b, [3,3]
+                            data_unsup_s['image'].shape[2:4],
+                            )
+            
+                # im=np.uint8((data_unsup_s['image'][0].transpose((1,2,0))*255.0).numpy())
+                # import cv2
+                # cv2.imwrite('img_transform.jpg',im)
+                # for m in range(len(teacher_bboxes[0])):
+                #     cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
+                #     cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+
+                # cv2.imwrite('img_transform.jpg',im)
+                
+                teacher_bboxes[i]=box_xyxy_to_cxcywh(teacher_bboxes[i])/data_unsup_s['im_shape'][i][0]
         
         teacher_info=[teacher_bboxes,teacher_labels]
         student_unsup=data_unsup_s
@@ -268,12 +271,14 @@ class DETR_SSOD(MultiSteamDetector):
         # self.id+=1
         for i in range(len(pseudo_bboxes)):
             pseudo_sum+=pseudo_bboxes[i].sum()
-        # print(self.id)
+
         if pseudo_sum==0:
             # print('pseudo_sum=0')
-            pseudo_bboxes[0]=paddle.ones([1,4])-0.5
-            pseudo_labels[0]=paddle.ones([1,1]).astype('int32')
-            student_unsup.update({'gt_bbox':pseudo_bboxes,'gt_class':pseudo_labels})
+            
+            # print(self.id)
+            pseudo_bboxes=[paddle.ones([1,4])-0.5]
+            pseudo_labels=[paddle.ones([1,1]).astype('int32')]
+            student_unsup.update({'image':student_unsup['image'][0:1],'gt_bbox':pseudo_bboxes,'gt_class':pseudo_labels})
             body_feats=self.student.backbone(student_unsup)
             if self.student.neck is not None:
                     body_feats = self.student.neck(body_feats)
@@ -374,3 +379,10 @@ def align_weak_strong_shape(data_weak, data_strong):
         mode='bilinear',
         align_corners=False)
     return data_weak, data_strong
+
+
+
+
+
+
+

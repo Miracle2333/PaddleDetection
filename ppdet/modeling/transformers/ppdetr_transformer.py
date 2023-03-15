@@ -386,40 +386,40 @@ class PPDETRTransformer(nn.Layer):
             memory, spatial_shapes, denoising_class, denoising_bbox_unact,is_teacher)
 
         # decoder
-        if is_teacher:
-            bs,q,c=init_ref_points_unact.shape
-            for i in range(3):
-                out_bboxes, out_logits = self.decoder(
-                    target,
-                    init_ref_points_unact,
-                    memory,
-                    spatial_shapes,
-                    level_start_index,
-                    self.dec_bbox_head,
-                    self.dec_score_head,
-                    self.query_pos_head,
-                    attn_mask=attn_mask)
-                diff_cls=float((F.sigmoid(out_logits).max(-1)-F.sigmoid(enc_topk_logits).max(-1)).abs().sum()/300)
-                iou=bbox_iou(paddle.reshape(out_bboxes,[-1,4]).transpose([1,0]),paddle.reshape(enc_topk_bboxes,[-1,4]).transpose([1,0]))
-                diff_iou=float(1-iou[iou>0].mean())
-                print(diff_cls)
-                print(diff_iou)
-                if i <3:
-                    enc_topk_bboxes=out_bboxes
-                    enc_topk_logits=out_logits
-                    init_ref_points_unact=inverse_sigmoid(enc_topk_bboxes).reshape([bs,q,c])
+        # if is_teacher:
+        #     bs,q,c=init_ref_points_unact.shape
+        #     for i in range(3):
+        #         out_bboxes, out_logits = self.decoder(
+        #             target,
+        #             init_ref_points_unact,
+        #             memory,
+        #             spatial_shapes,
+        #             level_start_index,
+        #             self.dec_bbox_head,
+        #             self.dec_score_head,
+        #             self.query_pos_head,
+        #             attn_mask=attn_mask)
+        #         # diff_cls=float((F.sigmoid(out_logits).max(-1)-F.sigmoid(enc_topk_logits).max(-1)).abs().sum()/300)
+        #         # iou=bbox_iou(paddle.reshape(out_bboxes,[-1,4]).transpose([1,0]),paddle.reshape(enc_topk_bboxes,[-1,4]).transpose([1,0]))
+        #         # diff_iou=float(1-iou[iou>0].mean())
+        #         # print(diff_cls)
+        #         # print(diff_iou)
+        #         if i <3:
+        #             enc_topk_bboxes=out_bboxes
+        #             enc_topk_logits=out_logits
+        #             init_ref_points_unact=inverse_sigmoid(enc_topk_bboxes).reshape([bs,q,c])
 
-        else: 
-            out_bboxes, out_logits = self.decoder(
-                target,
-                init_ref_points_unact,
-                memory,
-                spatial_shapes,
-                level_start_index,
-                self.dec_bbox_head,
-                self.dec_score_head,
-                self.query_pos_head,
-                attn_mask=attn_mask)
+        # else: 
+        out_bboxes, out_logits = self.decoder(
+            target,
+            init_ref_points_unact,
+            memory,
+            spatial_shapes,
+            level_start_index,
+            self.dec_bbox_head,
+            self.dec_score_head,
+            self.query_pos_head,
+            attn_mask=attn_mask)
         return (out_bboxes, out_logits, enc_topk_bboxes, enc_topk_logits,
                 dn_meta)
 

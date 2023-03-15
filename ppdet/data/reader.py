@@ -387,6 +387,8 @@ class BatchCompose_SSOD(Compose):
         # split strong_data from data(weak_data)
         strong_data = []
         for sample in data:
+            sample.update({'aug':'weak'})
+            sample['strong_aug'].update({'aug':'strong'})
             strong_data.append(sample['strong_aug'])
             sample.pop('strong_aug')
 
@@ -427,7 +429,7 @@ class BatchCompose_SSOD(Compose):
                 tmp_data = []
                 for i in range(len(data)):
                     tmp_data.append(data[i][k])
-                if not 'gt_' in k and not 'is_crowd' in k and not 'difficult' in k:
+                if not 'gt_' in k and not 'is_crowd' in k and not 'difficult' in k and not 'aug' in k :
                     tmp_data = np.stack(tmp_data, axis=0)
                 batch_data[k] = tmp_data
 
@@ -437,7 +439,7 @@ class BatchCompose_SSOD(Compose):
                 for i in range(len(strong_data)):
                     tmp_data.append(strong_data[i][k])
                     # print(tmp_data)
-                if not 'gt_' in k and not 'is_crowd' in k and not 'difficult' in k:
+                if not 'gt_' in k and not 'is_crowd' in k and not 'difficult' in k and not 'aug' in k:
                     tmp_data = np.stack(tmp_data, axis=0)
                 strong_batch_data[k] = tmp_data
 
