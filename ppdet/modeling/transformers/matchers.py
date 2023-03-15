@@ -183,10 +183,10 @@ class HungarianMatcherSemi(nn.Layer):
         logits=F.softmax(logits,axis=-1)
         tgt_class = paddle.concat(gt_class).unsqueeze(0).tile([logits.shape[0],1,1])
 
-        cost_class =  QFLv2(
+        cost_class =  F.binary_cross_entropy(
                         logits,
                         tgt_class,
-                        reduction='none').sum(-1)
+                reduction='none').sum(-1)
         cost_bbox = (
             out_bbox.unsqueeze(1) - tgt_bbox.unsqueeze(0)).abs().sum(-1)
 
