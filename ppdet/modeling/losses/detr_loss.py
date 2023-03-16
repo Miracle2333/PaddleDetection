@@ -155,7 +155,7 @@ class DETRLoss(nn.Layer):
         src_bbox, target_bbox = self._get_src_target_assign(boxes, gt_bbox,
                                                             match_indices)
         if gt_score is not None:
-            iou_mask=bbox_iou(bbox_cxcywh_to_xyxy(src_bbox).split(4, -1), bbox_cxcywh_to_xyxy(target_bbox).split(4, -1))>0.6
+            iou_mask=bbox_iou(bbox_cxcywh_to_xyxy(src_bbox).split(4, -1), bbox_cxcywh_to_xyxy(target_bbox).split(4, -1))>0.5
             num_gts= int((iou_mask>0).sum())
             src_bbox=src_bbox[iou_mask.squeeze(1)]
             target_bbox=target_bbox[iou_mask.squeeze(1)]

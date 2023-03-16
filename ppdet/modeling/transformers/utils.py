@@ -275,12 +275,11 @@ def varifocal_loss_with_logits(pred_logits,
         pred_logits, gt_score, weight=weight, reduction='none')
     indicator_matrix=[]
     for i in range(len(gt_score)):
-        
-        for i in range(len(label)):
-            if label[i].sum()>0:
-                indicator_matrix.append(paddle.ones([1, loss.shape[1], loss.shape[-1]]))
-            else:
-                indicator_matrix.append(paddle.zeros([1, loss.shape[1], loss.shape[-1]]))
+    
+        if gt_score[i].sum()>0:
+            indicator_matrix.append(paddle.ones([1, loss.shape[1], loss.shape[-1]]))
+        else:
+            indicator_matrix.append(paddle.zeros([1, loss.shape[1], loss.shape[-1]]))
     indicator_matrix=paddle.concat(indicator_matrix)
         # indicator_matrix = paddle.cat([i * paddle.ones(1, loss.shape[1], loss.shape[-1]) for i in label])
         # indicator_matrix = indicator_matrix.cuda()
