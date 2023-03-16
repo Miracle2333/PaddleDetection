@@ -211,6 +211,14 @@ def match_state_dict(model_state_dict, weight_state_dict):
         matched_keys[weight_key] = model_key
     return result_state_dict
 
+def load_semi_weights(self, t_weights, s_weights):
+    if self.is_loaded_weights:
+        return
+    self.start_epoch = 0
+    load_pretrain_weight(self.model.teacher, t_weights)
+    load_pretrain_weight(self.model.student, s_weights)
+    logger.info("Load teacher weights {} to start training".format(t_weights))
+    logger.info("Load student weights {} to start training".format(s_weights))
 
 def load_pretrain_weight(model, pretrain_weight):
     if is_url(pretrain_weight):

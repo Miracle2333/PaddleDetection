@@ -80,11 +80,11 @@ class DETR(BaseArch):
         # Backbone
         body_feats = self.backbone(self.inputs)
         if self.neck is not None:
-            body_feats = self.neck(body_feats)
+            body_feats = self.neck(body_feats,is_teacher=False)
 
         # Transformer
         pad_mask = self.inputs.get('pad_mask', None)
-        out_transformer = self.transformer(body_feats, pad_mask, self.inputs)
+        out_transformer = self.transformer(body_feats, self.inputs,is_teacher=False)
 
         # DETR Head
         if self.training:

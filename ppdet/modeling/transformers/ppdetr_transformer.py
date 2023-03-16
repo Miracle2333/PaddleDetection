@@ -35,7 +35,7 @@ from ..initializer import (linear_init_, constant_, xavier_uniform_, normal_,
                            bias_init_with_prob)
 from .utils import (_get_clones, get_sine_pos_embed,
                     get_contrastive_denoising_training_group, inverse_sigmoid)
-
+from ppdet.modeling.bbox_utils import bbox_iou
 __all__ = ['PPDETRTransformer']
 
 
@@ -144,7 +144,9 @@ class TransformerDecoder(nn.Layer):
                 score_head,
                 query_pos_head,
                 attn_mask=None,
-                memory_mask=None):
+                memory_mask=None,
+                is_teacher=False,
+                idx=None):
         output = tgt
         dec_out_bboxes = []
         dec_out_logits = []
@@ -158,10 +160,10 @@ class TransformerDecoder(nn.Layer):
             output = layer(output, ref_points_input, memory,
                            memory_spatial_shapes, memory_level_start_index,
                            attn_mask, memory_mask, query_pos_embed)
-
             inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
                 ref_points).detach())
-
+            if is_teacher and i==idx:
+                tgt=output
             if self.training:
                 dec_out_logits.append(score_head[i](output))
                 if i == 0:
@@ -176,8 +178,10 @@ class TransformerDecoder(nn.Layer):
                     dec_out_logits.append(score_head[i](output))
 
             ref_points = inter_ref_bbox
-
-        return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits)
+        if is_teacher:
+            return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits),tgt
+        else:
+            return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits)
 
 
 @register
@@ -251,6 +255,7 @@ class PPDETRTransformer(nn.Layer):
                                   num_layers=2)
 
         # encoder head
+        self.id =0 
         self.enc_output = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(
@@ -386,16 +391,50 @@ class PPDETRTransformer(nn.Layer):
             memory, spatial_shapes, denoising_class, denoising_bbox_unact,is_teacher)
 
         # decoder
-        out_bboxes, out_logits = self.decoder(
-            target,
-            init_ref_points_unact,
-            memory,
-            spatial_shapes,
-            level_start_index,
-            self.dec_bbox_head,
-            self.dec_score_head,
-            self.query_pos_head,
-            attn_mask=attn_mask)
+        if is_teacher:
+            bs,q,c=init_ref_points_unact.shape
+            self.id+=1
+            round_topk_bboxes = enc_topk_bboxes
+            round_topk_logits = enc_topk_logits
+            for i in range(3):
+                out_bboxes, out_logits,tgt = self.decoder(
+                    target,
+                    init_ref_points_unact,
+                    memory,
+                    spatial_shapes,
+                    level_start_index,
+                    self.dec_bbox_head,
+                    self.dec_score_head,
+                    self.query_pos_head,
+                    attn_mask=attn_mask,
+                    is_teacher=True,
+                    idx=i
+                    )
+                target=tgt
+                if i <3:
+                    diff_cls=float((F.sigmoid(out_logits.detach()).max(-1)-F.sigmoid(round_topk_logits.detach()).max(-1)).abs().sum()/300)          
+                    iou=bbox_iou(box_cxcywh_to_xyxy(paddle.reshape(out_bboxes.detach(),[-1,4])).transpose([1,0]),box_cxcywh_to_xyxy(paddle.reshape(round_topk_bboxes.detach(),[-1,4])).transpose([1,0]))
+                    diff_iou=float(1-iou.mean())
+                    if diff_iou>0.9:
+                        print('iou_error')
+                    if self.id%200==0:
+                        print(diff_cls)
+                        print(diff_iou)
+                    round_topk_bboxes=out_bboxes
+                    round_topk_logits=out_logits
+                    init_ref_points_unact=inverse_sigmoid(out_bboxes).reshape([bs,q,c])
+
+        else: 
+            out_bboxes, out_logits = self.decoder(
+                target,
+                init_ref_points_unact,
+                memory,
+                spatial_shapes,
+                level_start_index,
+                self.dec_bbox_head,
+                self.dec_score_head,
+                self.query_pos_head,
+                    attn_mask=attn_mask)
         return (out_bboxes, out_logits, enc_topk_bboxes, enc_topk_logits,
                 dn_meta)
 
@@ -476,3 +515,8 @@ class PPDETRTransformer(nn.Layer):
         return target, reference_points_unact.detach(
         ), enc_topk_bboxes, enc_topk_logits
 
+def box_cxcywh_to_xyxy(x):
+    x_c, y_c, w, h = x.unbind(-1)
+    b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
+         (x_c + 0.5 * w), (y_c + 0.5 * h)]
+    return paddle.stack(b, axis=-1)

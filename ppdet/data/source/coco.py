@@ -550,6 +550,7 @@ class SemiCOCODataSet(COCODataSet):
         if self.supervised:
             logger.info(f'Use {len(self.roidbs)} sup_samples data as LABELED')
         else:
+            # np.random.seed(10)
             if self.length > 0:  # unsup length will be decide by sup length
                 all_roidbs = self.roidbs.copy()
                 selected_idxs = [

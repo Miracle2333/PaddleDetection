@@ -15,6 +15,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+from pickle import NONE
 from typing import KeysView
 import copy
 from ppdet.core.workspace import register, create, merge_config
@@ -161,7 +162,7 @@ class DETR_SSOD(MultiSteamDetector):
             body_feats=self.teacher.backbone(data_unsup_w)
             if self.teacher.neck is not None:
                 body_feats = self.teacher.neck(body_feats,is_teacher=True)
-            out_transformer = self.teacher.transformer(body_feats, data_unsup_w,is_teacher=True)
+            out_transformer = self.teacher.transformer(body_feats,data_unsup_w,is_teacher=True)
             preds = self.teacher.detr_head(out_transformer, body_feats)
             bbox=preds[0].astype('float32')
             label=preds[1].argmax(-1).unsqueeze(-1).astype('float32')
@@ -209,6 +210,38 @@ class DETR_SSOD(MultiSteamDetector):
 
         teacher_bboxes = list(proposal_list)
         teacher_labels = proposal_label_list
+        # for i in range(1): 
+        #     if teacher_bboxes[i].sum()!=0:
+        #         teacher_bboxes[i]=box_cxcywh_to_xyxy(teacher_bboxes[i])*data_unsup_s['im_shape'][i][0]
+        # im=np.uint8((data_unsup_w['image'][0].transpose((1,2,0))*255.0).numpy())
+        # import cv2
+        # cv2.imwrite('img_transform_before.jpg',im)
+        # data_unsup_w['gt_bbox'][0]=box_cxcywh_to_xyxy(data_unsup_w['gt_bbox'][0])*data_unsup_s['im_shape'][0][0] 
+        # for i in range(data_unsup_w['gt_bbox'][0].shape[0]):
+        #     # data_unsup_w['gt_bbox'][0]=box_cxcywh_to_xyxy(data_unsup_w['gt_bbox'][0])*data_unsup_s['im_shape'][0][0]
+        #     cv2.rectangle(im, (int(data_unsup_w['gt_bbox'][0][i][0]), int(data_unsup_w['gt_bbox'][0][i][1])), (int(data_unsup_w['gt_bbox'][0][i][2]), int(data_unsup_w['gt_bbox'][0][i][3])), color=(255,255,255), thickness=2)
+        #     # cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+
+        # cv2.imwrite('img_transform_before.jpg',im) 
+        # for m in range(len(teacher_bboxes[0])):
+        #     if teacher_bboxes[0][m].sum()!=0:
+        #         cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
+        #         # cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+
+        # cv2.imwrite('img_transform_before.jpg',im)            
+        
+        # im=np.uint8((data_unsup_s['image'][0].transpose((1,2,0))*255.0).numpy())
+        # import cv2
+        # cv2.imwrite('img_transform.jpg',im)
+        # for m in range(len(teacher_bboxes[0])):
+        #     if teacher_bboxes[0][m].sum()!=0:
+        #         cv2.rectangle(im, (int(teacher_bboxes[0][m][0]), int(teacher_bboxes[0][m][1])), (int(teacher_bboxes[0][m][2]), int(teacher_bboxes[0][m][3])), color=(255,0,255), thickness=2)
+        #         cv2.putText(im,  str(teacher_labels[0][m]),(int(teacher_bboxes[0][m][0]),int(teacher_bboxes[0][m][1])) , cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 1)
+
+        # cv2.imwrite('img_transform.jpg',im)
+        # for i in range(1): 
+        #     if teacher_bboxes[i].sum()!=0:
+        #         teacher_bboxes[i]=box_xyxy_to_cxcywh(teacher_bboxes[i])/data_unsup_s['im_shape'][i][0]
         teacher_info=[teacher_bboxes,teacher_labels]
         student_unsup=data_unsup_s
         return self.compute_pseudo_label_loss(student_unsup, teacher_info)
@@ -277,6 +310,7 @@ class DETR_SSOD(MultiSteamDetector):
             body_feats=self.student.backbone(student_unsup)
             if self.student.neck is not None:
                     body_feats = self.student.neck(body_feats)
+
             out_transformer = self.student.transformer(body_feats,student_unsup)
             losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
         return losses
