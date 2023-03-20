@@ -166,7 +166,7 @@ class TransformerDecoder(nn.Layer):
             inter_ref_bbox = F.sigmoid(bbox_head_reg[i](box_init) + inverse_sigmoid(
                 ref_points).detach())
             # iou_score=bbox_head_iou[i](bbox_head[i](output))#要不要加sigmoid
-            if self.training:
+            if self.training or is_teacher:
                 dec_out_logits.append(score_head[i](output))
                 dec_out_ious.append(F.sigmoid(bbox_head_iou[i](box_init)))
                 if i == 0:
@@ -179,6 +179,7 @@ class TransformerDecoder(nn.Layer):
                 if i == len(self.layers) - 1:
                     dec_out_bboxes.append(inter_ref_bbox)
                     dec_out_logits.append(score_head[i](output))
+                    dec_out_ious.append(F.sigmoid(bbox_head_iou[i](box_init)))
 
             ref_points = inter_ref_bbox
         if self.training or is_teacher:
