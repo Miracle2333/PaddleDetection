@@ -21,14 +21,16 @@ import paddle.nn as nn
 import paddle.nn.functional as F
 from ppdet.core.workspace import register
 from .iou_loss import GIoULoss
-from ..transformers import bbox_cxcywh_to_xyxy, sigmoid_focal_loss
+from ..transformers import bbox_cxcywh_to_xyxy, sigmoid_focal_loss, varifocal_loss_with_logits
+from ..bbox_utils import bbox_iou
+#from IPython import embed
 
-__all__ = ['DETRLoss']
+__all__ = ['DETRLoss', 'DINOLoss']
 
 
 @register
 class DETRLoss(nn.Layer):
-    __shared__ = ['num_classes', 'use_focal_loss']
+    __shared__ = ['num_classes', 'use_focal_loss', 'for_distill']
     __inject__ = ['matcher']
 
     def __init__(self,
@@ -43,7 +45,11 @@ class DETRLoss(nn.Layer):
                      'dice': 1
                  },
                  aux_loss=True,
-                 use_focal_loss=False):
+                 use_focal_loss=False,
+                 use_vfl=False,
+                 use_same_match=False,
+                 same_match_ind=0,
+                 for_distill=False):
         r"""
         Args:
             num_classes (int): The number of classes.
@@ -60,6 +66,13 @@ class DETRLoss(nn.Layer):
         self.loss_coeff = loss_coeff
         self.aux_loss = aux_loss
         self.use_focal_loss = use_focal_loss
+        self.use_vfl = use_vfl
+        self.use_same_match = use_same_match
+        self.same_match_ind = same_match_ind
+
+        self.for_distill = for_distill
+        if self.for_distill:
+            self.distill_pairs = {}
 
         if not self.use_focal_loss:
             self.loss_coeff['class'] = paddle.full([num_classes + 1],
@@ -67,51 +80,103 @@ class DETRLoss(nn.Layer):
             self.loss_coeff['class'][-1] = loss_coeff['no_object']
         self.giou_loss = GIoULoss()
 
-    def _get_loss_class(self, logits, gt_class, match_indices, bg_index,
-                        num_gts):
+    def _get_loss_class(self,
+                        logits,
+                        gt_class,
+                        match_indices,
+                        bg_index,
+                        num_gts,
+                        postfix="",
+                        iou_score=None,
+                        gt_score=None):
         # logits: [b, query, num_classes], gt_class: list[[n, 1]]
+        name_class = "loss_class" + postfix
+        if logits is None:
+            return {name_class: paddle.zeros([1])}
         target_label = paddle.full(logits.shape[:2], bg_index, dtype='int64')
         bs, num_query_objects = target_label.shape
-        if sum(len(a) for a in gt_class) > 0:
+        num_gt = sum(len(a) for a in gt_class)
+        if num_gt > 0:
             index, updates = self._get_index_updates(num_query_objects,
                                                      gt_class, match_indices)
             target_label = paddle.scatter(
                 target_label.reshape([-1, 1]), index, updates.astype('int64'))
             target_label = target_label.reshape([bs, num_query_objects])
+        if gt_score is not None:
+            loss_weight = paddle.ones(logits.shape[:2]) * 0.5
+            if num_gt > 0:
+                score_index, score_updates = self._get_index_updates(
+                    num_query_objects, gt_score, match_indices)
+                loss_weight = paddle.scatter(
+                    loss_weight.reshape([-1, 1]), score_index, score_updates)
+            loss_weight = loss_weight.reshape([bs, num_query_objects, 1])
+        else:
+            loss_weight = None
         if self.use_focal_loss:
             target_label = F.one_hot(target_label,
                                      self.num_classes + 1)[..., :-1]
-        return {
-            'loss_class': self.loss_coeff['class'] * sigmoid_focal_loss(
-                logits, target_label, num_gts / num_query_objects)
-            if self.use_focal_loss else F.cross_entropy(
+            if iou_score is not None and self.use_vfl:
+                target_score = paddle.zeros([bs, num_query_objects])
+                if num_gt > 0:
+                    target_score = paddle.scatter(
+                        target_score.reshape([-1, 1]), index, iou_score)
+                target_score = target_score.reshape(
+                    [bs, num_query_objects, 1]) * target_label
+                loss_ = self.loss_coeff['class'] * varifocal_loss_with_logits(
+                    logits, target_score, target_label,
+                    num_gts / num_query_objects)
+            else:
+                loss_ = self.loss_coeff['class'] * sigmoid_focal_loss(
+                    logits, target_label, num_gts / num_query_objects)
+        else:
+            loss_ = F.cross_entropy(
                 logits, target_label, weight=self.loss_coeff['class'])
-        }
+        return {name_class: loss_}
 
-    def _get_loss_bbox(self, boxes, gt_bbox, match_indices, num_gts):
+    def _get_loss_bbox(self, boxes, gt_bbox, match_indices, num_gts,
+                       postfix="", gt_score=None):
         # boxes: [b, query, 4], gt_bbox: list[[n, 4]]
+        name_bbox = "loss_bbox" + postfix
+        name_giou = "loss_giou" + postfix
+        if boxes is None:
+            return {name_bbox: paddle.zeros([1]), name_giou: paddle.zeros([1])}
         loss = dict()
         if sum(len(a) for a in gt_bbox) == 0:
-            loss['loss_bbox'] = paddle.to_tensor([0.])
-            loss['loss_giou'] = paddle.to_tensor([0.])
+            loss[name_bbox] = paddle.to_tensor([0.])
+            loss[name_giou] = paddle.to_tensor([0.])
             return loss
 
         src_bbox, target_bbox = self._get_src_target_assign(boxes, gt_bbox,
                                                             match_indices)
-        loss['loss_bbox'] = self.loss_coeff['bbox'] * F.l1_loss(
-            src_bbox, target_bbox, reduction='sum') / num_gts
-        loss['loss_giou'] = self.giou_loss(
+        if gt_score is not None:
+            loss_weight = paddle.concat([
+                paddle.gather(
+                    t, J, axis=0)
+                if len(J) > 0 else paddle.zeros([0, t.shape[-1]])
+                for t, (_, J) in zip(gt_score, match_indices)
+            ])
+        else:
+            loss_weight = 1.
+        loss[name_bbox] = self.loss_coeff['bbox'] * (F.l1_loss(
+            src_bbox, target_bbox,
+            reduction='none') * loss_weight).sum() / num_gts
+        loss[name_giou] = self.giou_loss(
             bbox_cxcywh_to_xyxy(src_bbox), bbox_cxcywh_to_xyxy(target_bbox))
-        loss['loss_giou'] = loss['loss_giou'].sum() / num_gts
-        loss['loss_giou'] = self.loss_coeff['giou'] * loss['loss_giou']
+        loss[name_giou] = (loss[name_giou] * loss_weight).sum() / num_gts
+        loss[name_giou] = self.loss_coeff['giou'] * loss[name_giou]
         return loss
 
-    def _get_loss_mask(self, masks, gt_mask, match_indices, num_gts):
+    def _get_loss_mask(self, masks, gt_mask, match_indices, num_gts,
+                       postfix=""):
         # masks: [b, query, h, w], gt_mask: list[[n, H, W]]
+        name_mask = "loss_mask" + postfix
+        name_dice = "loss_dice" + postfix
+        if masks is None:
+            return {name_mask: paddle.zeros([1]), name_dice: paddle.zeros([1])}
         loss = dict()
         if sum(len(a) for a in gt_mask) == 0:
-            loss['loss_mask'] = paddle.to_tensor([0.])
-            loss['loss_dice'] = paddle.to_tensor([0.])
+            loss[name_mask] = paddle.to_tensor([0.])
+            loss[name_dice] = paddle.to_tensor([0.])
             return loss
 
         src_masks, target_masks = self._get_src_target_assign(masks, gt_mask,
@@ -120,12 +185,12 @@ class DETRLoss(nn.Layer):
             src_masks.unsqueeze(0),
             size=target_masks.shape[-2:],
             mode="bilinear")[0]
-        loss['loss_mask'] = self.loss_coeff['mask'] * F.sigmoid_focal_loss(
+        loss[name_mask] = self.loss_coeff['mask'] * F.sigmoid_focal_loss(
             src_masks,
             target_masks,
             paddle.to_tensor(
                 [num_gts], dtype='float32'))
-        loss['loss_dice'] = self.loss_coeff['dice'] * self._dice_loss(
+        loss[name_dice] = self.loss_coeff['dice'] * self._dice_loss(
             src_masks, target_masks, num_gts)
         return loss
 
@@ -138,25 +203,69 @@ class DETRLoss(nn.Layer):
         loss = 1 - (numerator + 1) / (denominator + 1)
         return loss.sum() / num_gts
 
-    def _get_loss_aux(self, boxes, logits, gt_bbox, gt_class, bg_index,
-                      num_gts):
+    def _get_loss_aux(self,
+                      boxes,
+                      logits,
+                      gt_bbox,
+                      gt_class,
+                      bg_index,
+                      num_gts,
+                      dn_match_indices=None,
+                      postfix="",
+                      gt_score=None):
+        if boxes is None or logits is None:
+            return {
+                "loss_class_aux" + postfix: paddle.paddle.zeros([1]),
+                "loss_bbox_aux" + postfix: paddle.paddle.zeros([1]),
+                "loss_giou_aux" + postfix: paddle.paddle.zeros([1])
+            }
         loss_class = []
         loss_bbox = []
         loss_giou = []
-        for aux_boxes, aux_logits in zip(boxes, logits):
-            match_indices = self.matcher(aux_boxes, aux_logits, gt_bbox,
+        if dn_match_indices is not None:
+            match_indices = dn_match_indices
+        elif self.use_same_match:
+            match_indices = self.matcher(boxes[self.same_match_ind],
+                                         logits[self.same_match_ind], gt_bbox,
                                          gt_class)
+        for aux_boxes, aux_logits in zip(boxes, logits):
+            if not self.use_same_match and dn_match_indices is None:
+                match_indices = self.matcher(aux_boxes, aux_logits, gt_bbox,
+                                             gt_class)
+            if self.use_vfl:
+                if sum(len(a) for a in gt_bbox) > 0:
+                    src_bbox, target_bbox = self._get_src_target_assign(
+                        aux_boxes.detach(), gt_bbox, match_indices)
+                    iou_score = bbox_iou(
+                        bbox_cxcywh_to_xyxy(src_bbox).split(4, -1),
+                        bbox_cxcywh_to_xyxy(target_bbox).split(4, -1))
+                else:
+                    iou_score = None
+            else:
+                iou_score = None
             loss_class.append(
-                self._get_loss_class(aux_logits, gt_class, match_indices,
-                                     bg_index, num_gts)['loss_class'])
-            loss_ = self._get_loss_bbox(aux_boxes, gt_bbox, match_indices,
-                                        num_gts)
-            loss_bbox.append(loss_['loss_bbox'])
-            loss_giou.append(loss_['loss_giou'])
+                self._get_loss_class(
+                    aux_logits,
+                    gt_class,
+                    match_indices,
+                    bg_index,
+                    num_gts,
+                    postfix,
+                    iou_score,
+                    gt_score=gt_score)['loss_class' + postfix])
+            loss_ = self._get_loss_bbox(
+                aux_boxes,
+                gt_bbox,
+                match_indices,
+                num_gts,
+                postfix,
+                gt_score=gt_score)
+            loss_bbox.append(loss_['loss_bbox' + postfix])
+            loss_giou.append(loss_['loss_giou' + postfix])
         loss = {
-            'loss_class_aux': paddle.add_n(loss_class),
-            'loss_bbox_aux': paddle.add_n(loss_bbox),
-            'loss_giou_aux': paddle.add_n(loss_giou)
+            "loss_class_aux" + postfix: paddle.add_n(loss_class),
+            "loss_bbox_aux" + postfix: paddle.add_n(loss_bbox),
+            "loss_giou_aux" + postfix: paddle.add_n(loss_giou)
         }
         return loss
 
@@ -185,46 +294,190 @@ class DETRLoss(nn.Layer):
         ])
         return src_assign, target_assign
 
+    def _get_src_target_assign_all(self, logit, src, label, target, match_indices):
+        logit_assign = paddle.concat([
+            paddle.gather(
+                t, I, axis=0) if len(I) > 0 else paddle.zeros([0, t.shape[-1]])
+            for t, (I, _) in zip(logit, match_indices)
+        ])
+        src_assign = paddle.concat([
+            paddle.gather(
+                t, I, axis=0) if len(I) > 0 else paddle.zeros([0, t.shape[-1]])
+            for t, (I, _) in zip(src, match_indices)
+        ])
+        label_assign = paddle.concat([
+            paddle.gather(
+                t, J, axis=0) if len(J) > 0 else paddle.zeros([0, t.shape[-1]])
+            for t, (_, J) in zip(label, match_indices)
+        ])
+        target_assign = paddle.concat([
+            paddle.gather(
+                t, J, axis=0) if len(J) > 0 else paddle.zeros([0, t.shape[-1]])
+            for t, (_, J) in zip(target, match_indices)
+        ])
+        return logit_assign, src_assign, label_assign, target_assign
+
     def forward(self,
                 boxes,
                 logits,
                 gt_bbox,
                 gt_class,
                 masks=None,
-                gt_mask=None):
+                gt_mask=None,
+                postfix="",
+                gt_score=None,
+                **kwargs):
         r"""
         Args:
-            boxes (Tensor): [l, b, query, 4]
-            logits (Tensor): [l, b, query, num_classes]
+            boxes (Tensor|None): [l, b, query, 4]
+            logits (Tensor|None): [l, b, query, num_classes]
             gt_bbox (List(Tensor)): list[[n, 4]]
             gt_class (List(Tensor)): list[[n, 1]]
             masks (Tensor, optional): [b, query, h, w]
             gt_mask (List(Tensor), optional): list[[n, H, W]]
+            postfix (str): postfix of loss name
         """
-        match_indices = self.matcher(boxes[-1].detach(), logits[-1].detach(),
-                                     gt_bbox, gt_class)
+        dn_match_indices = kwargs.get("dn_match_indices", None)
+        if dn_match_indices is None and (boxes is not None and
+                                         logits is not None):
+            match_indices = self.matcher(boxes[-1].detach(),
+                                         logits[-1].detach(), gt_bbox, gt_class)
+        else:
+            match_indices = dn_match_indices
+
         num_gts = sum(len(a) for a in gt_bbox)
-        try:
-            # TODO: Paddle does not have a "paddle.distributed.is_initialized()"
-            num_gts = paddle.to_tensor([num_gts], dtype=paddle.float32)
+        num_gts = paddle.to_tensor([num_gts], dtype="float32")
+        if paddle.distributed.get_world_size() > 1:
             paddle.distributed.all_reduce(num_gts)
-            num_gts = paddle.clip(
-                num_gts / paddle.distributed.get_world_size(), min=1).item()
-        except:
-            num_gts = max(num_gts.item(), 1)
+            num_gts /= paddle.distributed.get_world_size()
+        num_gts = paddle.clip(num_gts, min=1.) * kwargs.get("dn_num_group", 1.)
+
+        if self.for_distill and postfix == '':
+            if sum(len(a) for a in gt_bbox) > 0:
+                src_logit, src_bbox, target_cls, target_bbox = self._get_src_target_assign_all(
+                    logits[-1].detach(), boxes[-1].detach(), gt_class, gt_bbox, match_indices)
+                iou_score = bbox_iou(
+                    bbox_cxcywh_to_xyxy(src_bbox).split(4, -1),
+                    bbox_cxcywh_to_xyxy(target_bbox).split(4, -1))
+            else:
+                iou_score = None
+            self.distill_pairs['match_indices' + postfix] = match_indices
+            self.distill_pairs['src_logit' + postfix] = src_logit
+            self.distill_pairs['iou_score' + postfix] = iou_score
+
         total_loss = dict()
+        if boxes is not None and self.use_vfl:
+            if sum(len(a) for a in gt_bbox) > 0:
+                src_bbox, target_bbox = self._get_src_target_assign(
+                    boxes[-1].detach(), gt_bbox, match_indices)
+                iou_score = bbox_iou(
+                    bbox_cxcywh_to_xyxy(src_bbox).split(4, -1),
+                    bbox_cxcywh_to_xyxy(target_bbox).split(4, -1))
+            else:
+                iou_score = None
+        else:
+            iou_score = None
         total_loss.update(
-            self._get_loss_class(logits[-1], gt_class, match_indices,
-                                 self.num_classes, num_gts))
+            self._get_loss_class(logits[
+                -1] if logits is not None else None, gt_class, match_indices,
+                                 self.num_classes, num_gts, postfix, iou_score, gt_score))
         total_loss.update(
-            self._get_loss_bbox(boxes[-1], gt_bbox, match_indices, num_gts))
+            self._get_loss_bbox(boxes[-1] if boxes is not None else None,
+                                gt_bbox, match_indices, num_gts, postfix, gt_score))
+        # TODO: not support gt_score
         if masks is not None and gt_mask is not None:
             total_loss.update(
-                self._get_loss_mask(masks, gt_mask, match_indices, num_gts))
+                self._get_loss_mask(masks if masks is not None else None,
+                                    gt_mask, match_indices, num_gts, postfix))
 
         if self.aux_loss:
             total_loss.update(
-                self._get_loss_aux(boxes[:-1], logits[:-1], gt_bbox, gt_class,
-                                   self.num_classes, num_gts))
+                self._get_loss_aux(
+                    boxes[:-1] if boxes is not None else None, logits[:-1]
+                    if logits is not None else None, gt_bbox, gt_class,
+                    self.num_classes, num_gts, dn_match_indices, postfix, gt_score))
+
+        return total_loss
+
+
+@register
+class DINOLoss(DETRLoss):
+    def forward(self,
+                boxes,
+                logits,
+                gt_bbox,
+                gt_class,
+                proposal_bbox=None,
+                proposal_class=None,
+                proposal_score=None,
+                masks=None,
+                gt_mask=None,
+                postfix="",
+                dn_out_bboxes=None,
+                dn_out_logits=None,
+                dn_meta=None,
+                **kwargs):
+        total_loss = super(DINOLoss, self).forward(boxes, logits, gt_bbox,
+                                                   gt_class)
+
+        if proposal_bbox is not None:
+            use_same_match = self.use_same_match
+            use_vfl = self.use_vfl
+            use_pos_only = self.matcher.use_pos_only
+            self.use_same_match = self.use_vfl = False
+            self.matcher.use_pos_only = False
+            for i in range(len(proposal_bbox[0])):
+                extra_loss = super(DINOLoss, self).forward(
+                    boxes,
+                    logits, [
+                        proposal_bbox_per_img[i]
+                        for proposal_bbox_per_img in proposal_bbox
+                    ], [
+                        proposal_class_per_img[i]
+                        for proposal_class_per_img in proposal_class
+                    ],
+                    gt_score=[
+                        proposal_score_per_img[i]
+                        for proposal_score_per_img in proposal_score
+                    ],
+                    postfix=f'_proposal_{i}')
+                total_loss.update(extra_loss)
+
+            self.use_same_match = use_same_match
+            self.use_vfl = use_vfl
+            self.matcher.use_pos_only = use_pos_only
+
+        if dn_meta is not None:
+            dn_positive_idx, dn_num_group = \
+                dn_meta["dn_positive_idx"], dn_meta["dn_num_group"]
+            assert len(gt_class) == len(dn_positive_idx)
+
+            # denoising match indices
+            dn_match_indices = []
+            for i in range(len(gt_class)):
+                num_gt = len(gt_class[i])
+                if num_gt > 0:
+                    gt_idx = paddle.arange(end=num_gt, dtype="int64")
+                    gt_idx = gt_idx.unsqueeze(0).tile(
+                        [dn_num_group, 1]).flatten()
+                    assert len(gt_idx) == len(dn_positive_idx[i])
+                    dn_match_indices.append((dn_positive_idx[i], gt_idx))
+                else:
+                    dn_match_indices.append((paddle.zeros(
+                        [0], dtype="int64"), paddle.zeros(
+                            [0], dtype="int64")))
+        else:
+            dn_match_indices, dn_num_group = None, 1.
+
+        # compute denoising training loss
+        dn_loss = super(DINOLoss, self).forward(
+            dn_out_bboxes,
+            dn_out_logits,
+            gt_bbox,
+            gt_class,
+            postfix="_dn",
+            dn_match_indices=dn_match_indices,
+            dn_num_group=dn_num_group)
+        total_loss.update(dn_loss)
 
         return total_loss

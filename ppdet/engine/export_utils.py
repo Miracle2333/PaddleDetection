@@ -29,6 +29,7 @@ logger = setup_logger('ppdet.engine')
 # Global dictionary
 TRT_MIN_SUBGRAPH = {
     'YOLO': 3,
+    'PPYOLOE': 3,
     'SSD': 60,
     'RCNN': 40,
     'RetinaNet': 40,
@@ -42,6 +43,7 @@ TRT_MIN_SUBGRAPH = {
     'HRNet': 3,
     'DeepSORT': 3,
     'ByteTrack': 10,
+    'CenterTrack': 5,
     'JDE': 10,
     'FairMOT': 5,
     'GFL': 16,
@@ -49,10 +51,146 @@ TRT_MIN_SUBGRAPH = {
     'CenterNet': 5,
     'TOOD': 5,
     'YOLOX': 8,
+    'YOLOF': 40,
+    'METRO_Body': 3,
+    'DETR': 3,
 }
 
 KEYPOINT_ARCH = ['HigherHRNet', 'TopDownHRNet']
-MOT_ARCH = ['DeepSORT', 'JDE', 'FairMOT', 'ByteTrack']
+MOT_ARCH = ['JDE', 'FairMOT', 'DeepSORT', 'ByteTrack', 'CenterTrack']
+
+TO_STATIC_SPEC = {
+    'yolov3_darknet53_270e_coco': [{
+        'im_id': paddle.static.InputSpec(
+            name='im_id', shape=[-1, 1], dtype='float32'),
+        'is_crowd': paddle.static.InputSpec(
+            name='is_crowd', shape=[-1, 50], dtype='float32'),
+        'gt_bbox': paddle.static.InputSpec(
+            name='gt_bbox', shape=[-1, 50, 4], dtype='float32'),
+        'curr_iter': paddle.static.InputSpec(
+            name='curr_iter', shape=[-1], dtype='float32'),
+        'image': paddle.static.InputSpec(
+            name='image', shape=[-1, 3, -1, -1], dtype='float32'),
+        'im_shape': paddle.static.InputSpec(
+            name='im_shape', shape=[-1, 2], dtype='float32'),
+        'scale_factor': paddle.static.InputSpec(
+            name='scale_factor', shape=[-1, 2], dtype='float32'),
+        'target0': paddle.static.InputSpec(
+            name='target0', shape=[-1, 3, 86, -1, -1], dtype='float32'),
+        'target1': paddle.static.InputSpec(
+            name='target1', shape=[-1, 3, 86, -1, -1], dtype='float32'),
+        'target2': paddle.static.InputSpec(
+            name='target2', shape=[-1, 3, 86, -1, -1], dtype='float32'),
+    }],
+    'tinypose_128x96': [{
+        'center': paddle.static.InputSpec(
+            name='center', shape=[-1, 2], dtype='float32'),
+        'scale': paddle.static.InputSpec(
+            name='scale', shape=[-1, 2], dtype='float32'),
+        'im_id': paddle.static.InputSpec(
+            name='im_id', shape=[-1, 1], dtype='float32'),
+        'image': paddle.static.InputSpec(
+            name='image', shape=[-1, 3, 128, 96], dtype='float32'),
+        'score': paddle.static.InputSpec(
+            name='score', shape=[-1], dtype='float32'),
+        'rotate': paddle.static.InputSpec(
+            name='rotate', shape=[-1], dtype='float32'),
+        'target': paddle.static.InputSpec(
+            name='target', shape=[-1, 17, 32, 24], dtype='float32'),
+        'target_weight': paddle.static.InputSpec(
+            name='target_weight', shape=[-1, 17, 1], dtype='float32'),
+    }],
+    'fcos_r50_fpn_1x_coco': [{
+        'im_id': paddle.static.InputSpec(
+            name='im_id', shape=[-1, 1], dtype='float32'),
+        'curr_iter': paddle.static.InputSpec(
+            name='curr_iter', shape=[-1], dtype='float32'),
+        'image': paddle.static.InputSpec(
+            name='image', shape=[-1, 3, -1, -1], dtype='float32'),
+        'im_shape': paddle.static.InputSpec(
+            name='im_shape', shape=[-1, 2], dtype='float32'),
+        'scale_factor': paddle.static.InputSpec(
+            name='scale_factor', shape=[-1, 2], dtype='float32'),
+        'reg_target0': paddle.static.InputSpec(
+            name='reg_target0', shape=[-1, 160, 160, 4], dtype='float32'),
+        'labels0': paddle.static.InputSpec(
+            name='labels0', shape=[-1, 160, 160, 1], dtype='int32'),
+        'centerness0': paddle.static.InputSpec(
+            name='centerness0', shape=[-1, 160, 160, 1], dtype='float32'),
+        'reg_target1': paddle.static.InputSpec(
+            name='reg_target1', shape=[-1, 80, 80, 4], dtype='float32'),
+        'labels1': paddle.static.InputSpec(
+            name='labels1', shape=[-1, 80, 80, 1], dtype='int32'),
+        'centerness1': paddle.static.InputSpec(
+            name='centerness1', shape=[-1, 80, 80, 1], dtype='float32'),
+        'reg_target2': paddle.static.InputSpec(
+            name='reg_target2', shape=[-1, 40, 40, 4], dtype='float32'),
+        'labels2': paddle.static.InputSpec(
+            name='labels2', shape=[-1, 40, 40, 1], dtype='int32'),
+        'centerness2': paddle.static.InputSpec(
+            name='centerness2', shape=[-1, 40, 40, 1], dtype='float32'),
+        'reg_target3': paddle.static.InputSpec(
+            name='reg_target3', shape=[-1, 20, 20, 4], dtype='float32'),
+        'labels3': paddle.static.InputSpec(
+            name='labels3', shape=[-1, 20, 20, 1], dtype='int32'),
+        'centerness3': paddle.static.InputSpec(
+            name='centerness3', shape=[-1, 20, 20, 1], dtype='float32'),
+        'reg_target4': paddle.static.InputSpec(
+            name='reg_target4', shape=[-1, 10, 10, 4], dtype='float32'),
+        'labels4': paddle.static.InputSpec(
+            name='labels4', shape=[-1, 10, 10, 1], dtype='int32'),
+        'centerness4': paddle.static.InputSpec(
+            name='centerness4', shape=[-1, 10, 10, 1], dtype='float32'),
+    }],
+    'picodet_s_320_coco_lcnet': [{
+        'im_id': paddle.static.InputSpec(
+            name='im_id', shape=[-1, 1], dtype='float32'),
+        'is_crowd': paddle.static.InputSpec(
+            name='is_crowd', shape=[-1, -1, 1], dtype='float32'),
+        'gt_class': paddle.static.InputSpec(
+            name='gt_class', shape=[-1, -1, 1], dtype='int32'),
+        'gt_bbox': paddle.static.InputSpec(
+            name='gt_bbox', shape=[-1, -1, 4], dtype='float32'),
+        'curr_iter': paddle.static.InputSpec(
+            name='curr_iter', shape=[-1], dtype='float32'),
+        'image': paddle.static.InputSpec(
+            name='image', shape=[-1, 3, -1, -1], dtype='float32'),
+        'im_shape': paddle.static.InputSpec(
+            name='im_shape', shape=[-1, 2], dtype='float32'),
+        'scale_factor': paddle.static.InputSpec(
+            name='scale_factor', shape=[-1, 2], dtype='float32'),
+        'pad_gt_mask': paddle.static.InputSpec(
+            name='pad_gt_mask', shape=[-1, -1, 1], dtype='float32'),
+    }],
+    'ppyoloe_crn_s_300e_coco': [{
+        'im_id': paddle.static.InputSpec(
+            name='im_id', shape=[-1, 1], dtype='float32'),
+        'is_crowd': paddle.static.InputSpec(
+            name='is_crowd', shape=[-1, -1, 1], dtype='float32'),
+        'gt_class': paddle.static.InputSpec(
+            name='gt_class', shape=[-1, -1, 1], dtype='int32'),
+        'gt_bbox': paddle.static.InputSpec(
+            name='gt_bbox', shape=[-1, -1, 4], dtype='float32'),
+        'curr_iter': paddle.static.InputSpec(
+            name='curr_iter', shape=[-1], dtype='float32'),
+        'image': paddle.static.InputSpec(
+            name='image', shape=[-1, 3, -1, -1], dtype='float32'),
+        'im_shape': paddle.static.InputSpec(
+            name='im_shape', shape=[-1, 2], dtype='float32'),
+        'scale_factor': paddle.static.InputSpec(
+            name='scale_factor', shape=[-1, 2], dtype='float32'),
+        'pad_gt_mask': paddle.static.InputSpec(
+            name='pad_gt_mask', shape=[-1, -1, 1], dtype='float32'),
+    }],
+}
+
+
+def apply_to_static(config, model):
+    filename = config.get('filename', None)
+    spec = TO_STATIC_SPEC.get(filename, None)
+    model = paddle.jit.to_static(model, input_spec=spec)
+    logger.info("Successfully to apply @to_static with specs: {}".format(spec))
+    return model
 
 
 def _prune_input_spec(input_spec, program, targets):
@@ -140,10 +278,11 @@ def _dump_infer_config(config, path, image_shape, model):
         infer_cfg['export_onnx'] = True
         infer_cfg['export_eb'] = export_eb
 
-
     if infer_arch in MOT_ARCH:
         if infer_arch == 'DeepSORT':
             tracker_cfg = config['DeepSORTTracker']
+        elif infer_arch == 'CenterTrack':
+            tracker_cfg = config['CenterTracker']
         else:
             tracker_cfg = config['JDETracker']
         infer_cfg['tracker'] = _parse_tracker(tracker_cfg)
@@ -155,7 +294,10 @@ def _dump_infer_config(config, path, image_shape, model):
             arch_state = True
             break
 
-    if infer_arch == 'YOLOX':
+    if infer_arch == 'PPYOLOEWithAuxHead':
+        infer_arch = 'PPYOLOE'
+
+    if infer_arch in ['PPYOLOE', 'YOLOX', 'YOLOF']:
         infer_cfg['arch'] = infer_arch
         infer_cfg['min_subgraph_size'] = TRT_MIN_SUBGRAPH[infer_arch]
         arch_state = True
@@ -174,9 +316,15 @@ def _dump_infer_config(config, path, image_shape, model):
         label_arch = 'keypoint_arch'
 
     if infer_arch in MOT_ARCH:
-        label_arch = 'mot_arch'
-        reader_cfg = config['TestMOTReader']
-        dataset_cfg = config['TestMOTDataset']
+        if config['metric'] in ['COCO', 'VOC']:
+            # MOT model run as Detector
+            reader_cfg = config['TestReader']
+            dataset_cfg = config['TestDataset']
+        else:
+            # 'metric' in ['MOT', 'MCMOT', 'KITTI']
+            label_arch = 'mot_arch'
+            reader_cfg = config['TestMOTReader']
+            dataset_cfg = config['TestMOTDataset']
     else:
         reader_cfg = config['TestReader']
         dataset_cfg = config['TestDataset']

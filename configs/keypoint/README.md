@@ -3,7 +3,7 @@
 # 关键点检测系列模型
 
 <div align="center">
-  <img src="./football_keypoint.gif" width='800'/>
+  <img src="https://user-images.githubusercontent.com/22989727/205551833-a891a790-73c6-43cb-84f9-91553e9ef27b.gif" width='800'/>
 </div>
 
 ## 目录
@@ -56,8 +56,10 @@ PaddleDetection 中的关键点检测部分紧跟最先进的算法，包括 Top
 ## 模型库
 
 COCO数据集
+
 | 模型              |  方案              |输入尺寸 | AP(coco val) |                           模型下载                           | 配置文件 |  
 | :---------------- | -------- | :----------: | :----------------------------------------------------------: | ----------------------------------------------------| ------- |
+| PETR_Res50       |One-Stage| 512      |     65.5     | [petr_res50.pdparams](https://bj.bcebos.com/v1/paddledet/models/keypoint/petr_resnet50_16x2_coco.pdparams) | [config](./petr/petr_resnet50_16x2_coco.yml)       |
 | HigherHRNet-w32       |Bottom-Up| 512      |     67.1     | [higherhrnet_hrnet_w32_512.pdparams](https://paddledet.bj.bcebos.com/models/keypoint/higherhrnet_hrnet_w32_512.pdparams) | [config](./higherhrnet/higherhrnet_hrnet_w32_512.yml)       |
 | HigherHRNet-w32       | Bottom-Up| 640      |     68.3     | [higherhrnet_hrnet_w32_640.pdparams](https://paddledet.bj.bcebos.com/models/keypoint/higherhrnet_hrnet_w32_640.pdparams) | [config](./higherhrnet/higherhrnet_hrnet_w32_640.yml)       |
 | HigherHRNet-w32+SWAHR |Bottom-Up|  512      |     68.9     | [higherhrnet_hrnet_w32_512_swahr.pdparams](https://paddledet.bj.bcebos.com/models/keypoint/higherhrnet_hrnet_w32_512_swahr.pdparams) | [config](./higherhrnet/higherhrnet_hrnet_w32_512_swahr.yml) |
@@ -186,7 +188,7 @@ python deploy/python/mot_keypoint_unite_infer.py --mot_model_dir=output_inferenc
 ### 完整部署教程及Demo
 
 
-​ 我们提供了PaddleInference(服务器端)、PaddleLite(移动端)、第三方部署(MNN、OpenVino)支持。无需依赖训练代码，deploy文件夹下相应文件夹提供独立完整部署代码。 详见 [部署文档](https://github.com/PaddlePaddle/PaddleDetection/blob/release/2.5/deploy/README.md)介绍。
+​ 我们提供了PaddleInference(服务器端)、PaddleLite(移动端)、第三方部署(MNN、OpenVino)支持。无需依赖训练代码，deploy文件夹下相应文件夹提供独立完整部署代码。 详见 [部署文档](https://github.com/PaddlePaddle/PaddleDetection/blob/develop/deploy/README.md)介绍。
 
 ## 自定义数据训练
 
@@ -242,7 +244,7 @@ python deploy/python/det_keypoint_unite_infer.py \
 
 ## BenchMark
 
-我们给出了不同运行环境下的测试结果，供您在选用模型时参考。详细数据请见[Keypoint Inference Benchmark](https://github.com/PaddlePaddle/PaddleDetection/blob/release/2.5/configs/keypoint/KeypointBenchmark.md)。
+我们给出了不同运行环境下的测试结果，供您在选用模型时参考。详细数据请见[Keypoint Inference Benchmark](https://github.com/PaddlePaddle/PaddleDetection/blob/develop/configs/keypoint/KeypointBenchmark.md)。
 
 ## 引用
 

@@ -27,7 +27,7 @@ from paddle.inference import Config
 from paddle.inference import create_predictor
 
 import sys
-# add deploy path of PadleDetection to sys.path
+# add deploy path of PaddleDetection to sys.path
 parent_path = os.path.abspath(os.path.join(__file__, *(['..'])))
 sys.path.insert(0, parent_path)
 
@@ -40,10 +40,13 @@ from utils import argsparser, Timer, get_current_memory_mb, multiclass_nms, coco
 
 # Global dictionary
 SUPPORT_MODELS = {
-    'YOLO', 'RCNN', 'SSD', 'Face', 'FCOS', 'SOLOv2', 'TTFNet', 'S2ANet', 'JDE',
-    'FairMOT', 'DeepSORT', 'GFL', 'PicoDet', 'CenterNet', 'TOOD', 'RetinaNet',
-    'StrongBaseline', 'STGCN', 'YOLOX', 'PPHGNet', 'PPLCNet'
+    'YOLO', 'PPYOLOE', 'RCNN', 'SSD', 'Face', 'FCOS', 'SOLOv2', 'TTFNet',
+    'S2ANet', 'JDE', 'FairMOT', 'DeepSORT', 'GFL', 'PicoDet', 'CenterNet',
+    'TOOD', 'RetinaNet', 'StrongBaseline', 'STGCN', 'YOLOX', 'YOLOF', 'PPHGNet',
+    'PPLCNet', 'DETR', 'CenterTrack'
 }
+
+TUNED_TRT_DYNAMIC_MODELS = {'DETR'}
 
 
 def bench_log(detector, img_list, model_info, batch_size=1, name=None):
@@ -103,6 +106,7 @@ class Detector(object):
         self.pred_config = self.set_config(model_dir)
         self.predictor, self.config = load_predictor(
             model_dir,
+            self.pred_config.arch,
             run_mode=run_mode,
             batch_size=batch_size,
             min_subgraph_size=self.pred_config.min_subgraph_size,
@@ -155,9 +159,6 @@ class Detector(object):
         assert isinstance(np_boxes_num, np.ndarray), \
             '`np_boxes_num` should be a `numpy.ndarray`'
 
-        if np_boxes_num.sum() <= 0:
-            print('[WARNNING] No object detected.')
-            result = {'boxes': np.zeros([0, 6]), 'boxes_num': np_boxes_num}
         result = {k: v for k, v in result.items() if v is not None}
         return result
 
@@ -180,7 +181,7 @@ class Detector(object):
         filter_res = {'boxes': boxes, 'boxes_num': filter_num}
         return filter_res
 
-    def predict(self, repeats=1):
+    def predict(self, repeats=1, run_benchmark=False):
         '''
         Args:
             repeats (int): repeats number for prediction
@@ -192,13 +193,26 @@ class Detector(object):
         '''
         # model prediction
         np_boxes_num, np_boxes, np_masks = np.array([0]), None, None
+
+        if run_benchmark:
+            for i in range(repeats):
+                self.predictor.run()
+                paddle.device.cuda.synchronize()
+            result = dict(
+                boxes=np_boxes, masks=np_masks, boxes_num=np_boxes_num)
+            return result
+
         for i in range(repeats):
             self.predictor.run()
             output_names = self.predictor.get_output_names()
             boxes_tensor = self.predictor.get_output_handle(output_names[0])
             np_boxes = boxes_tensor.copy_to_cpu()
-            boxes_num = self.predictor.get_output_handle(output_names[1])
-            np_boxes_num = boxes_num.copy_to_cpu()
+            if len(output_names) == 1:
+                # some exported model can not get tensor 'bbox_num' 
+                np_boxes_num = np.array([len(np_boxes)])
+            else:
+                boxes_num = self.predictor.get_output_handle(output_names[1])
+                np_boxes_num = boxes_num.copy_to_cpu()
             if self.pred_config.mask:
                 masks_tensor = self.predictor.get_output_handle(output_names[2])
                 np_masks = masks_tensor.copy_to_cpu()
@@ -254,7 +268,7 @@ class Detector(object):
                 overlap_width_ratio=overlap_ratio[1])
             sub_img_num = len(slice_image_result)
             merged_bboxs = []
-            print('sub_img_num', sub_img_num)
+            print('slice to {} sub_samples.', sub_img_num)
 
             batch_image_list = [
                 slice_image_result.images[_ind] for _ind in range(sub_img_num)
@@ -267,9 +281,9 @@ class Detector(object):
                 self.det_times.preprocess_time_s.end()
 
                 # model prediction
-                result = self.predict(repeats=50)  # warmup
+                result = self.predict(repeats=50, run_benchmark=True)  # warmup
                 self.det_times.inference_time_s.start()
-                result = self.predict(repeats=repeats)
+                result = self.predict(repeats=repeats, run_benchmark=True)
                 self.det_times.inference_time_s.end(repeats=repeats)
 
                 # postprocess
@@ -303,7 +317,7 @@ class Detector(object):
             st, ed = 0, result['boxes_num'][0]  # start_index, end_index
             for _ind in range(sub_img_num):
                 boxes_num = result['boxes_num'][_ind]
-                ed = boxes_num
+                ed = st + boxes_num
                 shift_amount = slice_image_result.starting_pixels[_ind]
                 result['boxes'][st:ed][:, 2:4] = result['boxes'][
                     st:ed][:, 2:4] + shift_amount
@@ -365,9 +379,9 @@ class Detector(object):
                 self.det_times.preprocess_time_s.end()
 
                 # model prediction
-                result = self.predict(repeats=50)  # warmup
+                result = self.predict(repeats=50, run_benchmark=True)  # warmup
                 self.det_times.inference_time_s.start()
-                result = self.predict(repeats=repeats)
+                result = self.predict(repeats=repeats, run_benchmark=True)
                 self.det_times.inference_time_s.end(repeats=repeats)
 
                 # postprocess
@@ -431,7 +445,7 @@ class Detector(object):
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
         out_path = os.path.join(self.output_dir, video_out_name)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(* 'mp4v')
         writer = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
         index = 1
         while (1):
@@ -563,7 +577,7 @@ class DetectorSOLOv2(Detector):
             output_dir=output_dir,
             threshold=threshold, )
 
-    def predict(self, repeats=1):
+    def predict(self, repeats=1, run_benchmark=False):
         '''
         Args:
             repeats (int): repeat number for prediction
@@ -572,7 +586,20 @@ class DetectorSOLOv2(Detector):
                             'cate_label': label of segm, shape:[N]
                             'cate_score': confidence score of segm, shape:[N]
         '''
-        np_label, np_score, np_segms = None, None, None
+        np_segms, np_label, np_score, np_boxes_num = None, None, None, np.array(
+            [0])
+
+        if run_benchmark:
+            for i in range(repeats):
+                self.predictor.run()
+                paddle.device.cuda.synchronize()
+            result = dict(
+                segm=np_segms,
+                label=np_label,
+                score=np_score,
+                boxes_num=np_boxes_num)
+            return result
+
         for i in range(repeats):
             self.predictor.run()
             output_names = self.predictor.get_output_names()
@@ -654,7 +681,7 @@ class DetectorPicoDet(Detector):
         result = dict(boxes=np_boxes, boxes_num=np_boxes_num)
         return result
 
-    def predict(self, repeats=1):
+    def predict(self, repeats=1, run_benchmark=False):
         '''
         Args:
             repeats (int): repeat number for prediction
@@ -663,6 +690,14 @@ class DetectorPicoDet(Detector):
                             matix element:[class, score, x_min, y_min, x_max, y_max]
         '''
         np_score_list, np_boxes_list = [], []
+
+        if run_benchmark:
+            for i in range(repeats):
+                self.predictor.run()
+                paddle.device.cuda.synchronize()
+            result = dict(boxes=np_score_list, boxes_num=np_boxes_list)
+            return result
+
         for i in range(repeats):
             self.predictor.run()
             np_score_list.clear()
@@ -775,6 +810,7 @@ class PredictConfig():
 
 
 def load_predictor(model_dir,
+                   arch,
                    run_mode='paddle',
                    batch_size=1,
                    device='CPU',
@@ -787,7 +823,8 @@ def load_predictor(model_dir,
                    cpu_threads=1,
                    enable_mkldnn=False,
                    enable_mkldnn_bfloat16=False,
-                   delete_shuffle_pass=False):
+                   delete_shuffle_pass=False,
+                   tuned_trt_shape_file="shape_range_info.pbtxt"):
     """set AnalysisConfig, generate AnalysisPredictor
     Args:
         model_dir (str): root path of __model__ and __params__
@@ -825,8 +862,13 @@ def load_predictor(model_dir,
         # optimize graph and fuse op
         config.switch_ir_optim(True)
     elif device == 'XPU':
-        config.enable_lite_engine()
+        if config.lite_engine_enabled():
+            config.enable_lite_engine()
         config.enable_xpu(10 * 1024 * 1024)
+    elif device == 'NPU':
+        if config.lite_engine_enabled():
+            config.enable_lite_engine()
+        config.enable_npu()
     else:
         config.disable_gpu()
         config.set_cpu_math_library_num_threads(cpu_threads)
@@ -849,6 +891,8 @@ def load_predictor(model_dir,
         'trt_fp16': Config.Precision.Half
     }
     if run_mode in precision_map.keys():
+        if arch in TUNED_TRT_DYNAMIC_MODELS:
+            config.collect_shape_range_info(tuned_trt_shape_file)
         config.enable_tensorrt_engine(
             workspace_size=(1 << 25) * batch_size,
             max_batch_size=batch_size,
@@ -856,16 +900,22 @@ def load_predictor(model_dir,
             precision_mode=precision_map[run_mode],
             use_static=False,
             use_calib_mode=trt_calib_mode)
+        if arch in TUNED_TRT_DYNAMIC_MODELS:
+            config.enable_tuned_tensorrt_dynamic_shape(tuned_trt_shape_file,
+                                                       True)
 
         if use_dynamic_shape:
             min_input_shape = {
-                'image': [batch_size, 3, trt_min_shape, trt_min_shape]
+                'image': [batch_size, 3, trt_min_shape, trt_min_shape],
+                'scale_factor': [batch_size, 2]
             }
             max_input_shape = {
-                'image': [batch_size, 3, trt_max_shape, trt_max_shape]
+                'image': [batch_size, 3, trt_max_shape, trt_max_shape],
+                'scale_factor': [batch_size, 2]
             }
             opt_input_shape = {
-                'image': [batch_size, 3, trt_opt_shape, trt_opt_shape]
+                'image': [batch_size, 3, trt_opt_shape, trt_opt_shape],
+                'scale_factor': [batch_size, 2]
             }
             config.set_trt_dynamic_shape_info(min_input_shape, max_input_shape,
                                               opt_input_shape)
@@ -1023,8 +1073,8 @@ if __name__ == '__main__':
     FLAGS = parser.parse_args()
     print_arguments(FLAGS)
     FLAGS.device = FLAGS.device.upper()
-    assert FLAGS.device in ['CPU', 'GPU', 'XPU'
-                            ], "device should be CPU, GPU or XPU"
+    assert FLAGS.device in ['CPU', 'GPU', 'XPU', 'NPU'
+                            ], "device should be CPU, GPU, XPU or NPU"
     assert not FLAGS.use_gpu, "use_gpu has been deprecated, please use --device"
 
     assert not (

@@ -24,7 +24,7 @@ import pycocotools.mask as mask_util
 from ..initializer import linear_init_, constant_
 from ..transformers.utils import inverse_sigmoid
 
-__all__ = ['DETRHead', 'DeformableDETRHead']
+__all__ = ['DETRHead', 'DeformableDETRHead', 'DINOHead']
 
 
 class MLP(nn.Layer):
@@ -357,8 +357,130 @@ class DeformableDETRHead(nn.Layer):
         if self.training:
             assert inputs is not None
             assert 'gt_bbox' in inputs and 'gt_class' in inputs
-
-            return self.loss(outputs_bbox, outputs_logit, inputs['gt_bbox'],
-                             inputs['gt_class'])
+            total_loss = self.loss(outputs_bbox, outputs_logit,
+                                   inputs['gt_bbox'], inputs['gt_class'])
+            if inputs.get('proposal_bbox', None) is not None:
+                proposal_bbox, proposal_class, proposal_score = inputs[
+                    'proposal_bbox'], inputs['proposal_class'], inputs[
+                        'proposal_score']
+                for i in range(len(proposal_bbox[0])):
+                    extra_loss = self.loss(
+                        outputs_bbox,
+                        outputs_logit, [
+                            proposal_bbox_per_img[i]
+                            for proposal_bbox_per_img in proposal_bbox
+                        ], [
+                            proposal_class_per_img[i]
+                            for proposal_class_per_img in proposal_class
+                        ],
+                        gt_score=[
+                            proposal_score_per_img[i]
+                            for proposal_score_per_img in proposal_score
+                        ],
+                        postfix=f'_proposal_{i}')
+                    total_loss.update(extra_loss)
+            return total_loss
         else:
             return (outputs_bbox[-1], outputs_logit[-1], None)
+
+
+@register
+class DINOHead(nn.Layer):
+    __inject__ = ['loss']
+
+    def __init__(self, loss='DINOLoss', eval_idx=-1):
+        super(DINOHead, self).__init__()
+        self.loss = loss
+        self.eval_idx = eval_idx
+
+    def forward(self, out_transformer, body_feats, inputs=None):
+        (dec_out_bboxes, dec_out_logits, enc_topk_bboxes, enc_topk_logits,
+         dn_meta) = out_transformer
+        if self.training:
+            assert inputs is not None
+            assert 'gt_bbox' in inputs and 'gt_class' in inputs
+
+            if dn_meta is not None:
+                if isinstance(dn_meta, list):
+                    dual_groups = len(dn_meta) - 1
+                    dec_out_bboxes = paddle.split(
+                        dec_out_bboxes, dual_groups + 1, axis=2)
+                    dec_out_logits = paddle.split(
+                        dec_out_logits, dual_groups + 1, axis=2)
+                    enc_topk_bboxes = paddle.split(
+                        enc_topk_bboxes, dual_groups + 1, axis=1)
+                    enc_topk_logits = paddle.split(
+                        enc_topk_logits, dual_groups + 1, axis=1)
+
+                    dec_out_bboxes_list = []
+                    dec_out_logits_list = []
+                    dn_out_bboxes_list = []
+                    dn_out_logits_list = []
+                    loss = {}
+                    for g_id in range(dual_groups + 1):
+                        if dn_meta[g_id] is not None:
+                            dn_out_bboxes_gid, dec_out_bboxes_gid = paddle.split(
+                                dec_out_bboxes[g_id],
+                                dn_meta[g_id]['dn_num_split'],
+                                axis=2)
+                            dn_out_logits_gid, dec_out_logits_gid = paddle.split(
+                                dec_out_logits[g_id],
+                                dn_meta[g_id]['dn_num_split'],
+                                axis=2)
+                        else:
+                            dn_out_bboxes_gid, dn_out_logits_gid = None, None
+                            dec_out_bboxes_gid = dec_out_bboxes[g_id]
+                            dec_out_logits_gid = dec_out_logits[g_id]
+                        out_bboxes_gid = paddle.concat([
+                            enc_topk_bboxes[g_id].unsqueeze(0),
+                            dec_out_bboxes_gid
+                        ])
+                        out_logits_gid = paddle.concat([
+                            enc_topk_logits[g_id].unsqueeze(0),
+                            dec_out_logits_gid
+                        ])
+                        loss_gid = self.loss(
+                            out_bboxes_gid,
+                            out_logits_gid,
+                            inputs['gt_bbox'],
+                            inputs['gt_class'],
+                            dn_out_bboxes=dn_out_bboxes_gid,
+                            dn_out_logits=dn_out_logits_gid,
+                            dn_meta=dn_meta[g_id])
+                        # sum loss
+                        for key, value in loss_gid.items():
+                            loss.update({
+                                key: loss.get(key, paddle.zeros([1])) + value
+                            })
+
+                    # average across (dual_groups + 1)
+                    for key, value in loss.items():
+                        loss.update({key: value / (dual_groups + 1)})
+                    return loss
+                else:
+                    dn_out_bboxes, dec_out_bboxes = paddle.split(
+                        dec_out_bboxes, dn_meta['dn_num_split'], axis=2)
+                    dn_out_logits, dec_out_logits = paddle.split(
+                        dec_out_logits, dn_meta['dn_num_split'], axis=2)
+            else:
+                dn_out_bboxes, dn_out_logits = None, None
+
+            out_bboxes = paddle.concat(
+                [enc_topk_bboxes.unsqueeze(0), dec_out_bboxes])
+            out_logits = paddle.concat(
+                [enc_topk_logits.unsqueeze(0), dec_out_logits])
+
+            return self.loss(
+                out_bboxes,
+                out_logits,
+                inputs['gt_bbox'],
+                inputs['gt_class'],
+                proposal_bbox=inputs.get('proposal_bbox', None),
+                proposal_class=inputs.get('proposal_class', None),
+                proposal_score=inputs.get('proposal_score', None),
+                dn_out_bboxes=dn_out_bboxes,
+                dn_out_logits=dn_out_logits,
+                dn_meta=dn_meta)
+        else:
+            return (dec_out_bboxes[self.eval_idx],
+                    dec_out_logits[self.eval_idx], None)

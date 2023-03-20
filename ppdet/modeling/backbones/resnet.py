@@ -285,36 +285,6 @@ class BottleNeck(nn.Layer):
         # ResNeXt
         width = int(ch_out * (base_width / 64.)) * groups
 
-        self.shortcut = shortcut
-        if not shortcut:
-            if variant == 'd' and stride == 2:
-                self.short = nn.Sequential()
-                self.short.add_sublayer(
-                    'pool',
-                    nn.AvgPool2D(
-                        kernel_size=2, stride=2, padding=0, ceil_mode=True))
-                self.short.add_sublayer(
-                    'conv',
-                    ConvNormLayer(
-                        ch_in=ch_in,
-                        ch_out=ch_out * self.expansion,
-                        filter_size=1,
-                        stride=1,
-                        norm_type=norm_type,
-                        norm_decay=norm_decay,
-                        freeze_norm=freeze_norm,
-                        lr=lr))
-            else:
-                self.short = ConvNormLayer(
-                    ch_in=ch_in,
-                    ch_out=ch_out * self.expansion,
-                    filter_size=1,
-                    stride=stride,
-                    norm_type=norm_type,
-                    norm_decay=norm_decay,
-                    freeze_norm=freeze_norm,
-                    lr=lr)
-
         self.branch2a = ConvNormLayer(
             ch_in=ch_in,
             ch_out=width,
@@ -350,6 +320,36 @@ class BottleNeck(nn.Layer):
             norm_decay=norm_decay,
             freeze_norm=freeze_norm,
             lr=lr)
+
+        self.shortcut = shortcut
+        if not shortcut:
+            if variant == 'd' and stride == 2:
+                self.short = nn.Sequential()
+                self.short.add_sublayer(
+                    'pool',
+                    nn.AvgPool2D(
+                        kernel_size=2, stride=2, padding=0, ceil_mode=True))
+                self.short.add_sublayer(
+                    'conv',
+                    ConvNormLayer(
+                        ch_in=ch_in,
+                        ch_out=ch_out * self.expansion,
+                        filter_size=1,
+                        stride=1,
+                        norm_type=norm_type,
+                        norm_decay=norm_decay,
+                        freeze_norm=freeze_norm,
+                        lr=lr))
+            else:
+                self.short = ConvNormLayer(
+                    ch_in=ch_in,
+                    ch_out=ch_out * self.expansion,
+                    filter_size=1,
+                    stride=stride,
+                    norm_type=norm_type,
+                    norm_decay=norm_decay,
+                    freeze_norm=freeze_norm,
+                    lr=lr)
 
         self.std_senet = std_senet
         if self.std_senet:
@@ -403,7 +403,8 @@ class Blocks(nn.Layer):
                     ch_in=ch_in,
                     ch_out=ch_out,
                     stride=2 if i == 0 and stage_num != 2 else 1,
-                    shortcut=False if i == 0 else True,
+                    # shortcut=False if i == 0 else True,
+                    shortcut=(variant == 'b' and stage_num == 2 and ch_in == ch_out * block.expansion) if i == 0 else True, 
                     variant=variant,
                     groups=groups,
                     base_width=base_width,
@@ -443,7 +444,8 @@ class ResNet(nn.Layer):
                  return_idx=[0, 1, 2, 3],
                  dcn_v2_stages=[-1],
                  num_stages=4,
-                 std_senet=False):
+                 std_senet=False,
+                 freeze_stem_only=False):
         """
         Residual Network, see https://arxiv.org/abs/1512.03385
         
@@ -558,8 +560,9 @@ class ResNet(nn.Layer):
 
         if freeze_at >= 0:
             self._freeze_parameters(self.conv1)
-            for i in range(min(freeze_at + 1, num_stages)):
-                self._freeze_parameters(self.res_layers[i])
+            if not freeze_stem_only:
+                for i in range(min(freeze_at + 1, num_stages)):
+                    self._freeze_parameters(self.res_layers[i])
 
     def _freeze_parameters(self, m):
         for p in m.parameters():
