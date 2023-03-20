@@ -49,6 +49,28 @@ class MLP(nn.Layer):
         for i, layer in enumerate(self.layers):
             x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
         return x
+class MLP_new(nn.Layer):
+    """This code is based on
+        https://github.com/facebookresearch/detr/blob/main/models/detr.py
+    """
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.LayerList(
+            nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for l in self.layers:
+            linear_init_(l)
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x))
+        return x
 
 
 class MultiHeadAttentionMap(nn.Layer):
@@ -371,10 +393,10 @@ class DINOHead(nn.Layer):
         self.loss = loss
         self.eval_idx = eval_idx
 
-    def forward(self, out_transformer, body_feats, inputs=None):
-        (dec_out_bboxes, dec_out_logits, enc_topk_bboxes, enc_topk_logits,
+    def forward(self, out_transformer, body_feats, inputs=None,is_teacher=False):
+        (dec_out_bboxes, dec_out_logits,dec_out_ious, enc_topk_bboxes, enc_topk_logits,enc_topk_ious,
          dn_meta) = out_transformer
-        if self.training:
+        if self.training or is_teacher:
             assert inputs is not None
             assert 'gt_bbox' in inputs and 'gt_class' in inputs
 
@@ -383,6 +405,9 @@ class DINOHead(nn.Layer):
                     dec_out_bboxes, dn_meta['dn_num_split'], axis=2)
                 dn_out_logits, dec_out_logits = paddle.split(
                     dec_out_logits, dn_meta['dn_num_split'], axis=2)
+                dn_out_ious, dec_out_ious = paddle.split(
+                    dec_out_ious, dn_meta['dn_num_split'], axis=2)
+  
             else:
                 dn_out_bboxes, dn_out_logits = None, None
 
@@ -390,14 +415,17 @@ class DINOHead(nn.Layer):
                 [enc_topk_bboxes.unsqueeze(0), dec_out_bboxes])
             out_logits = paddle.concat(
                 [enc_topk_logits.unsqueeze(0), dec_out_logits])
-
+            out_ious=paddle.concat(
+                [enc_topk_ious.unsqueeze(0), dec_out_ious])
             return self.loss(
                 out_bboxes,
                 out_logits,
+                out_ious,
                 inputs['gt_bbox'],
                 inputs['gt_class'],
                 dn_out_bboxes=dn_out_bboxes,
                 dn_out_logits=dn_out_logits,
+                dn_out_ious=dn_out_ious,
                 dn_meta=dn_meta)
         else:
             return (dec_out_bboxes[self.eval_idx],

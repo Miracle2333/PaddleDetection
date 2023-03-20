@@ -159,15 +159,14 @@ class BatchRandomResize(BaseOperator):
             target_size = self.target_size[index]
         else:
             target_size = self.target_size
-        if context is not None:
-            target_size=self.target_size[context]
+
         if self.random_interp:
             interp = np.random.choice(self.interps)
         else:
             interp = self.interp
 
         resizer = Resize(target_size, keep_ratio=self.keep_ratio, interp=interp)
-        return [resizer(samples, context=context),index]
+        return resizer(samples, context=context)
 
 
 @register_op

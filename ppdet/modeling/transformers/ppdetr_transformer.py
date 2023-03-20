@@ -29,7 +29,7 @@ from paddle.regularizer import L2Decay
 
 from ppdet.core.workspace import register
 from ..layers import MultiHeadAttention
-from ..heads.detr_head import MLP
+from ..heads.detr_head import MLP,MLP_new
 from .deformable_transformer import MSDeformableAttention
 from ..initializer import (linear_init_, constant_, xavier_uniform_, normal_,
                            bias_init_with_prob)
@@ -141,13 +141,17 @@ class TransformerDecoder(nn.Layer):
                 memory_spatial_shapes,
                 memory_level_start_index,
                 bbox_head,
+                bbox_head_reg,
+                bbox_head_iou,
                 score_head,
                 query_pos_head,
                 attn_mask=None,
-                memory_mask=None):
+                memory_mask=None,
+                is_teacher=False):
         output = tgt
         dec_out_bboxes = []
         dec_out_logits = []
+        dec_out_ious = []
         ref_points = F.sigmoid(ref_points_unact)
         for i, layer in enumerate(self.layers):
             ref_points_input = ref_points.detach().unsqueeze(2)
@@ -158,26 +162,29 @@ class TransformerDecoder(nn.Layer):
             output = layer(output, ref_points_input, memory,
                            memory_spatial_shapes, memory_level_start_index,
                            attn_mask, memory_mask, query_pos_embed)
-
-            inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
+            box_init=bbox_head[i](output)
+            inter_ref_bbox = F.sigmoid(bbox_head_reg[i](box_init) + inverse_sigmoid(
                 ref_points).detach())
-
+            # iou_score=bbox_head_iou[i](bbox_head[i](output))#要不要加sigmoid
             if self.training:
                 dec_out_logits.append(score_head[i](output))
+                dec_out_ious.append(F.sigmoid(bbox_head_iou[i](box_init)))
                 if i == 0:
                     dec_out_bboxes.append(inter_ref_bbox)
                 else:
                     dec_out_bboxes.append(
-                        F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
-                            ref_points)))
+                    F.sigmoid(bbox_head_reg[i](box_init) + inverse_sigmoid(
+                                    ref_points).detach()))
             else:
                 if i == len(self.layers) - 1:
                     dec_out_bboxes.append(inter_ref_bbox)
                     dec_out_logits.append(score_head[i](output))
 
             ref_points = inter_ref_bbox
-
-        return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits)
+        if self.training or is_teacher:
+            return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits),paddle.stack(dec_out_ious)
+        else:
+            return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits),paddle.stack(dec_out_ious)
 
 
 @register
@@ -258,7 +265,9 @@ class PPDETRTransformer(nn.Layer):
                 weight_attr=ParamAttr(regularizer=L2Decay(0.0)),
                 bias_attr=ParamAttr(regularizer=L2Decay(0.0))))
         self.enc_score_head = nn.Linear(hidden_dim, num_classes)
-        self.enc_bbox_head = MLP(hidden_dim, hidden_dim, 4, num_layers=3)
+        self.enc_bbox_head = MLP_new(hidden_dim, hidden_dim, hidden_dim, num_layers=2)
+        self.enc_bbox_reg_head = nn.Linear(hidden_dim, 4)
+        self.enc_bbox_iou_head = nn.Linear(hidden_dim, 1)#todo relu
 
         # decoder head
         self.dec_score_head = nn.LayerList([
@@ -266,25 +275,40 @@ class PPDETRTransformer(nn.Layer):
             for _ in range(num_decoder_layers)
         ])
         self.dec_bbox_head = nn.LayerList([
-            MLP(hidden_dim, hidden_dim, 4, num_layers=3)
+            MLP_new(hidden_dim, hidden_dim, hidden_dim, num_layers=2)
             for _ in range(num_decoder_layers)
         ])
-
+        self.dec_bbox_head_reg = nn.LayerList([
+            nn.Linear(hidden_dim, 4)
+            for _ in range(num_decoder_layers)
+        ])
+        self.dec_bbox_head_iou = nn.LayerList([
+            nn.Linear(hidden_dim,1)
+            for _ in range(num_decoder_layers)
+        ])
         self._reset_parameters()
 
     def _reset_parameters(self):
         # class and bbox head init
         bias_cls = bias_init_with_prob(0.01)
+        bias_reg = bias_init_with_prob(0.01)
         linear_init_(self.enc_score_head)
         constant_(self.enc_score_head.bias, bias_cls)
-        constant_(self.enc_bbox_head.layers[-1].weight)
-        constant_(self.enc_bbox_head.layers[-1].bias)
-        for cls_, reg_ in zip(self.dec_score_head, self.dec_bbox_head):
+        constant_(self.enc_bbox_reg_head.weight)
+        constant_(self.enc_bbox_reg_head.bias)
+        linear_init_(self.enc_bbox_iou_head)
+        constant_(self.enc_bbox_iou_head.bias,bias_reg)
+        for cls_ in self.dec_score_head:
             linear_init_(cls_)
             constant_(cls_.bias, bias_cls)
-            constant_(reg_.layers[-1].weight)
-            constant_(reg_.layers[-1].bias)
-
+            
+        for reg_ in self.dec_bbox_head_iou:
+            linear_init_(reg_)
+            constant_(reg_.bias, bias_reg)
+        for reg_ in self.dec_bbox_head_reg:
+            constant_(reg_.weight)
+            constant_(reg_.bias)  
+                  
         linear_init_(self.enc_output[0])
         xavier_uniform_(self.enc_output[0].weight)
         if self.learnt_init_query:
@@ -381,22 +405,25 @@ class PPDETRTransformer(nn.Layer):
         else:
             denoising_class, denoising_bbox_unact, attn_mask, dn_meta = None, None, None, None
 
-        target, init_ref_points_unact, enc_topk_bboxes, enc_topk_logits = \
+        target, init_ref_points_unact, enc_topk_bboxes, enc_topk_logits,enc_topk_ious = \
             self._get_decoder_input(
             memory, spatial_shapes, denoising_class, denoising_bbox_unact,is_teacher)
 
         # decoder
-        out_bboxes, out_logits = self.decoder(
+        out_bboxes, out_logits,out_ious = self.decoder(
             target,
             init_ref_points_unact,
             memory,
             spatial_shapes,
             level_start_index,
             self.dec_bbox_head,
+            self.dec_bbox_head_reg,
+            self.dec_bbox_head_iou,
             self.dec_score_head,
             self.query_pos_head,
-            attn_mask=attn_mask)
-        return (out_bboxes, out_logits, enc_topk_bboxes, enc_topk_logits,
+            attn_mask=attn_mask,
+            is_teacher=is_teacher)
+        return (out_bboxes, out_logits,out_ious, enc_topk_bboxes, enc_topk_logits,enc_topk_ious,
                 dn_meta)
 
     def _generate_anchors(self,
@@ -448,8 +475,8 @@ class PPDETRTransformer(nn.Layer):
         output_memory = self.enc_output(memory)
 
         enc_outputs_class = self.enc_score_head(output_memory)
-        enc_outputs_coord_unact = self.enc_bbox_head(output_memory) + anchors
-
+        enc_outputs_coord_unact = self.enc_bbox_reg_head(output_memory) + anchors
+        enc_outputs_coord_iou=self.enc_bbox_iou_head(output_memory)
         _, topk_ind = paddle.topk(
             enc_outputs_class.max(-1), self.num_queries, axis=1)
         # extract region proposal boxes
@@ -459,7 +486,11 @@ class PPDETRTransformer(nn.Layer):
 
         reference_points_unact = paddle.gather_nd(enc_outputs_coord_unact,
                                                   topk_ind)  # unsigmoided.
+        enc_topk_ious=paddle.gather_nd(enc_outputs_coord_iou,
+                                                  topk_ind)
+        enc_topk_ious = F.sigmoid(enc_topk_ious) 
         enc_topk_bboxes = F.sigmoid(reference_points_unact)
+        
         if denoising_bbox_unact is not None:
             reference_points_unact = paddle.concat(
                 [denoising_bbox_unact, reference_points_unact], 1)
@@ -474,5 +505,5 @@ class PPDETRTransformer(nn.Layer):
             target = paddle.concat([denoising_class, target], 1)
 
         return target, reference_points_unact.detach(
-        ), enc_topk_bboxes, enc_topk_logits
+        ), enc_topk_bboxes, enc_topk_logits,enc_topk_ious
 

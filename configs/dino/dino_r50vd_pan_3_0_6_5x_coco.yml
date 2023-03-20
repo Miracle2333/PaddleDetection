@@ -10,4 +10,26 @@ weights: output/dino_r50vd_pan_3_0_6_5x_coco/model_final
 find_unused_parameters: True
 log_iter: 200
 snapshot_epoch: 5
-# pretrain_weights: http://10.255.134.13:8091/dino/PaddleDetection/output/dino_r50vd_pan_3_0_6_5x_coco/9.pdparams
+pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_vd_ssld_v2_pretrained.pdparams
+metric: COCO
+num_classes: 80
+
+# partial labeled COCO, use `SemiCOCODataSet` rather than `COCODataSet`
+TrainDataset:
+  !COCODataSet
+    image_dir: train2017
+    anno_path: semi_annotations/instances_train2017.1@5.json
+    dataset_dir: dataset/coco
+    data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
+
+EvalDataset:
+  !COCODataSet
+    image_dir: val2017
+    anno_path: annotations/instances_val2017.json
+    dataset_dir: dataset/coco
+    allow_empty: true
+
+TestDataset:
+  !ImageFolder
+    anno_path: annotations/instances_val2017.json # also support txt (like VOC's label_list.txt)
+    dataset_dir: dataset/coco # if set, anno_path will be 'dataset_dir/anno_path'

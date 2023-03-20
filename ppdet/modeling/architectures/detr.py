@@ -83,8 +83,8 @@ class DETR(BaseArch):
             body_feats = self.neck(body_feats)
 
         # Transformer
-        pad_mask = self.inputs.get('pad_mask', None)
-        out_transformer = self.transformer(body_feats, pad_mask, self.inputs)
+        # pad_mask = self.inputs.get('pad_mask', None)
+        out_transformer = self.transformer(body_feats, self.inputs)
 
         # DETR Head
         if self.training:
@@ -97,6 +97,7 @@ class DETR(BaseArch):
             return detr_losses
         else:
             preds = self.detr_head(out_transformer, body_feats)
+            # preds=(preds[0],preds[1])
             if self.exclude_post_process:
                 bboxes, logits, masks = preds
                 return bboxes, logits

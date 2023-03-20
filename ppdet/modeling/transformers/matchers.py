@@ -18,6 +18,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+import imp
 
 import paddle
 import paddle.nn as nn
@@ -25,8 +26,9 @@ import paddle.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 
 from ppdet.core.workspace import register, serializable
-from ..losses.iou_loss import GIoULoss
+from ..losses.iou_loss import GIoULoss,IoU
 from .utils import bbox_cxcywh_to_xyxy
+from ppdet.modeling.bbox_utils import bbox_iou
 
 __all__ = ['HungarianMatcher']
 
@@ -56,6 +58,7 @@ class HungarianMatcher(nn.Layer):
         self.gamma = gamma
 
         self.giou_loss = GIoULoss()
+        self.iou=IoU()
 
     def forward(self, boxes, logits, gt_bbox, gt_class):
         r"""
@@ -109,11 +112,12 @@ class HungarianMatcher(nn.Layer):
         # Compute the L1 cost between boxes
         cost_bbox = (
             out_bbox.unsqueeze(1) - tgt_bbox.unsqueeze(0)).abs().sum(-1)
-
+        # self.iou( bbox_cxcywh_to_xyxy(out_bbox.unsqueeze(1)), bbox_cxcywh_to_xyxy(tgt_bbox.unsqueeze(0)))
         # Compute the giou cost betwen boxes
         cost_giou = self.giou_loss(
             bbox_cxcywh_to_xyxy(out_bbox.unsqueeze(1)),
             bbox_cxcywh_to_xyxy(tgt_bbox.unsqueeze(0))).squeeze(-1)
+
 
         # Final cost matrix
         C = self.matcher_coeff['class'] * cost_class + self.matcher_coeff['bbox'] * cost_bbox + \
