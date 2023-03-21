@@ -124,7 +124,7 @@ class DETRLoss(nn.Layer):
         name_giou = "loss_giou" + postfix
         name_iou = "loss_iou" + postfix
         if boxes is None:
-            return {name_bbox: paddle.zeros([1]), name_giou: paddle.zeros([1])}
+            return {name_bbox: paddle.zeros([1]), name_giou: paddle.zeros([1]),name_iou: paddle.zeros([1])}
         loss = dict()
         if sum(len(a) for a in gt_bbox) == 0:
             loss[name_bbox] = paddle.to_tensor([0.])
@@ -137,8 +137,7 @@ class DETRLoss(nn.Layer):
                                                             match_indices)   
  
         iou=self.iou( bbox_cxcywh_to_xyxy(src_bbox), bbox_cxcywh_to_xyxy(target_bbox))
-        # loss[name_iou]=self.loss_coeff['bbox'] *F.binary_cross_entropy(src_score, iou,reduction='none').sum() / num_gts
-        loss[name_iou]=F.binary_cross_entropy(src_score, iou,reduction='none').sum() / num_gts
+        loss[name_iou]=self.loss_coeff['bbox']*F.binary_cross_entropy(src_score, iou,reduction='none').mean()/ num_gts
         loss[name_bbox] = self.loss_coeff['bbox'] * F.l1_loss(
             src_bbox, target_bbox, reduction='sum') / num_gts
         loss[name_giou] = self.giou_loss(
@@ -321,7 +320,7 @@ class DETRLoss(nn.Layer):
                                  self.num_classes, num_gts, postfix, iou_score))
         total_loss.update(
             self._get_loss_bbox(boxes[-1] if boxes is not None else None,
-                                gt_bbox, match_indices, num_gts, postfix,iou_scores=ious[-1]))
+                                gt_bbox, match_indices, num_gts, postfix,iou_scores=ious[-1] if ious is not None else None))
         if masks is not None and gt_mask is not None:
             total_loss.update(
                 self._get_loss_mask(masks if masks is not None else None,
@@ -332,7 +331,7 @@ class DETRLoss(nn.Layer):
                 self._get_loss_aux(
                     boxes[:-1] if boxes is not None else None, logits[:-1]
                     if logits is not None else None,gt_bbox, gt_class,
-                    self.num_classes, num_gts, dn_match_indices, postfix,iou_scores=ious[:-1]))
+                    self.num_classes, num_gts, dn_match_indices, postfix,iou_scores=ious[:-1] if ious is not None else None))
 
         return total_loss
 
