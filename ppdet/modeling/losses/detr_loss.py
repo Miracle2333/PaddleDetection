@@ -426,6 +426,7 @@ class DINOLoss(DETRLoss):
             use_pos_only = self.matcher.use_pos_only
             self.use_same_match = self.use_vfl = False
             self.matcher.use_pos_only = False
+            num_proposal = len(proposal_bbox[0])
             for i in range(len(proposal_bbox[0])):
                 extra_loss = super(DINOLoss, self).forward(
                     boxes,
@@ -441,6 +442,8 @@ class DINOLoss(DETRLoss):
                         for proposal_score_per_img in proposal_score
                     ],
                     postfix=f'_proposal_{i}')
+                for key, value in extra_loss.items():
+                    extra_loss[key] = value / num_proposal
                 total_loss.update(extra_loss)
 
             self.use_same_match = use_same_match

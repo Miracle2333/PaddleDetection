@@ -88,6 +88,7 @@ class COCODataSet(DetDataset):
 
     def _load_proposal(self, proposal_file):
         imgid2proposal = defaultdict(list)
+        proposal_file = os.path.join(self.dataset_dir, proposal_file)
         with open(proposal_file, 'r') as f:
             proposals = json.load(f)
 

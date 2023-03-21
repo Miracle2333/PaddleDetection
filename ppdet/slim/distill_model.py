@@ -67,7 +67,7 @@ class DistillModel(nn.Layer):
         self.distill_cfg = slim_cfg
 
         # load pretrain weights
-        self.is_inherit = True # False
+        self.is_inherit = False # False
         if stu_pretrain:
             if self.is_inherit and tea_pretrain:
                 load_pretrain_weight(self.student_model, tea_pretrain)
@@ -492,7 +492,7 @@ class KDDETRDistillModel(DistillModel):
             kd_loss = sum(losses[k] * self.distill_loss.weight_dict[k] for k in losses.keys() if k in self.distill_loss.weight_dict)
 
             det_total_loss = student_loss['loss']
-            total_loss = det_total_loss + kd_loss
+            total_loss = det_total_loss + kd_loss * 2
             student_loss['loss'] = total_loss
             student_loss['stu_loss'] = det_total_loss
             student_loss['kd_loss'] = kd_loss
