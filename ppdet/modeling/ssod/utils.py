@@ -104,44 +104,16 @@ def QFLv2(pred_sigmoid,
 
 
 
-def filter_invalid(bbox, label=None, score=None, mask=None, thr=0.0, min_size=0):
+def filter_invalid(bbox, label=None, iou=None,score=None, thr=0.0, min_size=0):
     if score.numel() > 0:
         # valid = score > thr
         valid = score >= thr
-        # if valid.shape[0] == 1 :
-        #     bbox = bbox if valid.item() else paddle.expand(paddle.to_tensor([])[:, None], (-1, 4))
-        # else:
         bbox = bbox[valid]
+        label = label[valid]
+        iou=iou[valid]
+        score=score[valid]
 
-        if label is not None:
-            # if valid.shape[0] == 1 :
-            #     label = label if valid.item() else paddle.to_tensor([])
-            # else:
-            label = label[valid]
-        # bbox = bbox[valid]
-        # if label is not None:
-        #     label = label[valid]
-        if mask is not None:
-            mask = BitmapMasks(mask.masks[valid.cpu().numpy()], mask.height, mask.width)
-    if min_size is not None and bbox.shape[0] > 0:
-        bw = bbox[:, 2]
-        bh = bbox[:, 3]
-        valid = (bw > min_size) & (bh > min_size)
-
-        # if valid.shape[0] == 1 :
-        #     bbox = bbox if valid.item() else paddle.expand(paddle.to_tensor([])[:, None], (-1, 4))
-        # else:
-        bbox = bbox[valid]
-
-        if label is not None:
-            # if valid.shape[0] == 1 :
-            #     label = label if valid.item() else paddle.to_tensor([])
-            # else:
-            label = label[valid]
-            
-        if mask is not None:
-            mask = BitmapMasks(mask.masks[valid.cpu().numpy()], mask.height, mask.width)
-    return bbox, label, mask
+    return bbox, label, score,iou
 
 
 def weighted_loss(loss: dict, weight, ignore_keys=[], warmup=0):

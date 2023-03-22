@@ -162,54 +162,64 @@ class DETR_SSOD(MultiSteamDetector):
             if self.teacher.neck is not None:
                 body_feats = self.teacher.neck(body_feats,is_teacher=True)
             out_transformer = self.teacher.transformer(body_feats, data_unsup_w,is_teacher=True)
-            preds = self.teacher.detr_head(out_transformer, body_feats)
+            preds = self.teacher.detr_head(out_transformer, body_feats,is_teacher=True)
             bbox=preds[0].astype('float32')
             label=preds[1].argmax(-1).unsqueeze(-1).astype('float32')
             score=F.softmax(preds[1],axis=2).max(-1).unsqueeze(-1).astype('float32')
+            iou_score=preds[-1]
             bs,bbox_num=bbox.shape[:2]
             bbox_num=paddle.tile(paddle.to_tensor([bbox_num]), [bs])
         self.place=body_feats[0].place
 
 
-        bboxes=paddle.concat([label,score,bbox],axis=-1).reshape([-1,6])
+        bboxes=paddle.concat([label,score,bbox,iou_score],axis=-1).reshape([-1,7])
         # print(score.max())    
-        if bboxes.numel() > 0:
-            proposal_list = paddle.concat([bboxes[:,2:], bboxes[:,1:2]], axis=-1)
-            proposal_list = proposal_list.split(tuple(np.array(bbox_num)), 0)
-        else:
-            proposal_list = [paddle.expand(paddle.to_tensor([])[:, None], (-1, 5),place=self.place)]
+
+        proposal_score_list = bboxes[:,1:2].squeeze(-1)
+        proposal_score_list  = proposal_score_list.split(tuple(np.array(bbox_num)), 0)
         
         proposal_label_list = paddle.cast(bboxes[:, 0], np.int32)
         proposal_label_list = proposal_label_list.split(tuple(np.array(bbox_num)), 0)
-            
-        proposal_list = [paddle.to_tensor(p, place=self.place) for p in proposal_list]
-        proposal_label_list = [paddle.to_tensor(p, place=self.place) for p in proposal_label_list]
 
+        proposal_bbox_list = bboxes[:,2:6]
+        proposal_bbox_list  = proposal_bbox_list.split(tuple(np.array(bbox_num)), 0)
+        
+        proposal_iou_list = paddle.cast(bboxes[:, -1], np.float32)
+        proposal_iou_list = proposal_iou_list.split(tuple(np.array(bbox_num)), 0)     
+            
+        proposal_score_list = [paddle.to_tensor(p, place=self.place) for p in proposal_score_list]
+        proposal_label_list = [paddle.to_tensor(p, place=self.place) for p in proposal_label_list]
+        proposal_bbox_list = [paddle.to_tensor(p, place=self.place) for p in proposal_bbox_list]
+        proposal_iou_list = [paddle.to_tensor(p, place=self.place) for p in proposal_iou_list]
+        
         if isinstance(self.train_cfg['pseudo_label_initial_score_thr'], float):
             thr = self.train_cfg['pseudo_label_initial_score_thr']
         else:
             # TODO: use dynamic threshold
             raise NotImplementedError("Dynamic Threshold is not implemented yet.") 
-        proposal_list, proposal_label_list, _ = list(
+        proposal_bbox_list, proposal_label_list, proposal_score_list,proposal_iou_list = list(
             zip(
                 *[
                     filter_invalid(
-                        proposal[:,:4],
+                        proposal_bbox,
                         proposal_label,
-                        proposal[:, -1],
+                        proposal_iou,
+                        proposal_score,
                         thr=thr,
                         min_size=self.train_cfg['min_pseduo_box_size'],
                     )
-                    for proposal, proposal_label in zip(
-                        proposal_list, proposal_label_list
+                    for proposal_bbox, proposal_label,proposal_score,proposal_iou in zip(
+                        proposal_bbox_list, proposal_label_list, proposal_score_list,proposal_iou_list
                     )
                 ]
             )
         )
 
-        teacher_bboxes = list(proposal_list)
+        teacher_bboxes = list(proposal_bbox_list)
         teacher_labels = proposal_label_list
-        teacher_info=[teacher_bboxes,teacher_labels]
+        teacher_scores = proposal_score_list
+        teacher_ious = proposal_iou_list
+        teacher_info=[teacher_bboxes,teacher_labels,teacher_scores,teacher_ious]
         student_unsup=data_unsup_s
         return self.compute_pseudo_label_loss(student_unsup, teacher_info)
 
@@ -217,19 +227,27 @@ class DETR_SSOD(MultiSteamDetector):
 
         pseudo_bboxes=list(teacher_info[0])
         pseudo_labels=list(teacher_info[1])
+        pseudo_scores=list(teacher_info[2])
+        pseudo_ious=list(teacher_info[3])
         losses = dict()
         for i in range(len(pseudo_bboxes)):
             if pseudo_labels[i].shape[0]==0:
                 pseudo_bboxes[i]=paddle.zeros([0,4]).numpy()
                 pseudo_labels[i]=paddle.zeros([0,1]).numpy()
+                pseudo_scores[i]=paddle.zeros([0,1]).numpy()
+                pseudo_ious[i]=paddle.zeros([0,1]).numpy()
             else:
                 pseudo_bboxes[i]=pseudo_bboxes[i][:,:4].numpy()
                 pseudo_labels[i]=pseudo_labels[i].unsqueeze(-1).numpy()
+                pseudo_scores[i]=pseudo_scores[i].unsqueeze(-1).numpy()
+                pseudo_ious[i]=pseudo_ious[i].unsqueeze(-1).numpy()
         for i in range(len(pseudo_bboxes)):
             pseudo_labels[i]= paddle.to_tensor(pseudo_labels[i],dtype=paddle.int32,place=self.place)
             pseudo_bboxes[i]= paddle.to_tensor(pseudo_bboxes[i],dtype=paddle.float32,place=self.place)
+            pseudo_scores[i]= paddle.to_tensor(pseudo_scores[i],dtype=paddle.float32,place=self.place)
+            pseudo_ious[i]= paddle.to_tensor(pseudo_ious[i],dtype=paddle.float32,place=self.place)
         # print(pseudo_bboxes[0].shape[0])
-        student_unsup.update({'gt_bbox':pseudo_bboxes,'gt_class':pseudo_labels})
+        student_unsup.update({'gt_bbox':pseudo_bboxes,'gt_class':pseudo_labels,'gt_iou':pseudo_ious,'gt_score':pseudo_scores})
         # student_data.update(gt_bbox=pseudo_bboxes,gt_class=pseudo_labels)
         pseudo_sum=0
         # self.id+=1
@@ -262,6 +280,8 @@ class DETR_SSOD(MultiSteamDetector):
         else:
             gt_bbox=[]
             gt_class=[]
+            gt_score=[]
+            gt_iou=[]
             images=[]
             for i in range(len(pseudo_bboxes)):
                 if pseudo_labels[i].shape[0]==0:
@@ -269,16 +289,16 @@ class DETR_SSOD(MultiSteamDetector):
                 else:
                     gt_class.append(pseudo_labels[i])
                     gt_bbox.append(pseudo_bboxes[i])
+                    gt_score.append(pseudo_scores[i])
+                    gt_iou.append(pseudo_ious[i])                   
                     images.append(student_unsup['image'][i])
             images=paddle.stack(images)
-            student_unsup.update({'image':images,'gt_bbox':gt_bbox,'gt_class':gt_class})
-            
-            
+            student_unsup.update({'image':images,'gt_bbox':gt_bbox,'gt_class':gt_class,'gt_iou':gt_iou,'gt_score':gt_score})
             body_feats=self.student.backbone(student_unsup)
             if self.student.neck is not None:
                     body_feats = self.student.neck(body_feats)
             out_transformer = self.student.transformer(body_feats,student_unsup)
-            losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
+            losses = self.student.detr_head(out_transformer, body_feats, student_unsup,is_student=True)
         return losses
 
 

@@ -386,17 +386,18 @@ class DeformableDETRHead(nn.Layer):
 
 @register
 class DINOHead(nn.Layer):
-    __inject__ = ['loss']
+    __inject__ = ['loss', 'semi_loss']
 
-    def __init__(self, loss='DINOLoss', eval_idx=-1):
+    def __init__(self, loss='DINOLoss', semi_loss='DINOLoss_semi',eval_idx=-1):
         super(DINOHead, self).__init__()
         self.loss = loss
+        self.semi_loss=semi_loss
         self.eval_idx = eval_idx
 
-    def forward(self, out_transformer, body_feats, inputs=None,is_teacher=False):
+    def forward(self, out_transformer, body_feats, inputs=None,is_teacher=False,is_student=False):
         (dec_out_bboxes, dec_out_logits,dec_out_ious, enc_topk_bboxes, enc_topk_logits,enc_topk_ious,
          dn_meta) = out_transformer
-        if self.training or is_teacher:
+        if self.training:
             assert inputs is not None
             assert 'gt_bbox' in inputs and 'gt_class' in inputs
 
@@ -417,16 +418,32 @@ class DINOHead(nn.Layer):
                 [enc_topk_logits.unsqueeze(0), dec_out_logits])
             out_ious=paddle.concat(
                 [enc_topk_ious.unsqueeze(0), dec_out_ious])
-            return self.loss(
-                out_bboxes,
-                out_logits,
-                out_ious,
-                inputs['gt_bbox'],
-                inputs['gt_class'],
-                dn_out_bboxes=dn_out_bboxes,
-                dn_out_logits=dn_out_logits,
-                dn_out_ious=dn_out_ious,
-                dn_meta=dn_meta)
+            if is_student:
+                return self.semi_loss(
+                    out_bboxes,
+                    out_logits,
+                    out_ious,
+                    inputs['gt_bbox'],
+                    inputs['gt_class'],
+                    inputs['gt_iou'],
+                    dn_out_bboxes=dn_out_bboxes,
+                    dn_out_logits=dn_out_logits,
+                    dn_out_ious=dn_out_ious,
+                    dn_meta=dn_meta)
+            else:
+                return self.loss(
+                    out_bboxes,
+                    out_logits,
+                    out_ious,
+                    inputs['gt_bbox'],
+                    inputs['gt_class'],
+                    dn_out_bboxes=dn_out_bboxes,
+                    dn_out_logits=dn_out_logits,
+                    dn_out_ious=dn_out_ious,
+                    dn_meta=dn_meta)
+        elif is_teacher:
+            return (dec_out_bboxes[self.eval_idx],
+                    dec_out_logits[self.eval_idx], dec_out_ious[self.eval_idx])
         else:
             return (dec_out_bboxes[self.eval_idx],
                     dec_out_logits[self.eval_idx], None)
