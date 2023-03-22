@@ -442,8 +442,9 @@ class DINOLoss(DETRLoss):
                         for proposal_score_per_img in proposal_score
                     ],
                     postfix=f'_proposal_{i}')
-                for key, value in extra_loss.items():
-                    extra_loss[key] = value / num_proposal
+                # noramlize proposal loss
+                #for key, value in extra_loss.items():
+                #    extra_loss[key] = value / num_proposal
                 total_loss.update(extra_loss)
 
             self.use_same_match = use_same_match
