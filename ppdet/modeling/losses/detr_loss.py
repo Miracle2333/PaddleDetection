@@ -21,7 +21,7 @@ import paddle.nn as nn
 import paddle.nn.functional as F
 from ppdet.core.workspace import register
 from .iou_loss import GIoULoss
-from ..transformers import bbox_cxcywh_to_xyxy, sigmoid_focal_loss, varifocal_loss_with_logits
+from ..transformers import bbox_cxcywh_to_xyxy, sigmoid_focal_loss, varifocal_loss_with_logits,varifocal_loss_with_iou
 from ..bbox_utils import bbox_iou
 from ppdet.modeling.losses.iou_loss import GIoULoss,IoU
 __all__ = ['DETRLoss', 'DINOLoss']
@@ -82,7 +82,8 @@ class DETRLoss(nn.Layer):
                         bg_index,
                         num_gts,
                         postfix="",
-                        iou_score=None):
+                        iou_score=None,
+                        gt_ious=None):
         # logits: [b, query, num_classes], gt_class: list[[n, 1]]
         name_class = "loss_class" + postfix
         if logits is None:
@@ -107,7 +108,7 @@ class DETRLoss(nn.Layer):
                 target_score = target_score.reshape(
                     [bs, num_query_objects, 1]) * target_label
                 loss_ = self.loss_coeff['class'] * varifocal_loss_with_logits(
-                    logits, target_score, target_label,
+                    F.sigmoid(logits), target_score, target_label,
                     num_gts / num_query_objects)
             else:
                 loss_ = self.loss_coeff['class'] * sigmoid_focal_loss(
@@ -129,6 +130,7 @@ class DETRLoss(nn.Layer):
         if sum(len(a) for a in gt_bbox) == 0:
             loss[name_bbox] = paddle.to_tensor([0.])
             loss[name_giou] = paddle.to_tensor([0.])
+            loss[name_iou] = paddle.to_tensor([0.])
             return loss
 
         src_bbox, target_bbox = self._get_src_target_assign(boxes, gt_bbox,
@@ -137,7 +139,8 @@ class DETRLoss(nn.Layer):
                                                             match_indices)   
  
         iou=self.iou( bbox_cxcywh_to_xyxy(src_bbox), bbox_cxcywh_to_xyxy(target_bbox))
-        loss[name_iou]=self.loss_coeff['bbox']*F.binary_cross_entropy(src_score, iou,reduction='none').mean()/ num_gts
+        # loss[name_iou]=self.loss_coeff['bbox'] *F.binary_cross_entropy(src_score, iou,reduction='none').sum() / num_gts
+        loss[name_iou]=self.loss_coeff['bbox'] *F.binary_cross_entropy(src_score, iou,reduction='mean')/ num_gts
         loss[name_bbox] = self.loss_coeff['bbox'] * F.l1_loss(
             src_bbox, target_bbox, reduction='sum') / num_gts
         loss[name_giou] = self.giou_loss(
@@ -227,7 +230,7 @@ class DETRLoss(nn.Layer):
                 iou_score = None
             loss_class.append(
                 self._get_loss_class(aux_logits, gt_class, match_indices,
-                                     bg_index, num_gts, postfix, iou_score)[
+                                     bg_index, num_gts, postfix, iou_score,gt_ious=aux_ious)[
                                          'loss_class' + postfix])
             loss_ = self._get_loss_bbox(aux_boxes, gt_bbox, match_indices,
                                         num_gts, postfix,iou_scores=aux_ious)
@@ -317,10 +320,10 @@ class DETRLoss(nn.Layer):
         total_loss.update(
             self._get_loss_class(logits[
                 -1] if logits is not None else None, gt_class, match_indices,
-                                 self.num_classes, num_gts, postfix, iou_score))
+                                 self.num_classes, num_gts, postfix, iou_score,gt_ious=ious[-1]))
         total_loss.update(
             self._get_loss_bbox(boxes[-1] if boxes is not None else None,
-                                gt_bbox, match_indices, num_gts, postfix,iou_scores=ious[-1] if ious is not None else None))
+                                gt_bbox, match_indices, num_gts, postfix,iou_scores=ious[-1]))
         if masks is not None and gt_mask is not None:
             total_loss.update(
                 self._get_loss_mask(masks if masks is not None else None,
@@ -331,7 +334,7 @@ class DETRLoss(nn.Layer):
                 self._get_loss_aux(
                     boxes[:-1] if boxes is not None else None, logits[:-1]
                     if logits is not None else None,gt_bbox, gt_class,
-                    self.num_classes, num_gts, dn_match_indices, postfix,iou_scores=ious[:-1] if ious is not None else None))
+                    self.num_classes, num_gts, dn_match_indices, postfix,iou_scores=ious[:-1]))
 
         return total_loss
 
@@ -388,5 +391,4 @@ class DINOLoss(DETRLoss):
             dn_match_indices=dn_match_indices,
             dn_num_group=dn_num_group)
         total_loss.update(dn_loss)
-
         return total_loss
