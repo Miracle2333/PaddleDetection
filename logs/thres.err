@@ -1,0 +1,68 @@
+grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+LAUNCH INFO 2023-03-15 07:40:55,050 -----------  Configuration  ----------------------
+LAUNCH INFO 2023-03-15 07:40:55,050 devices: None
+LAUNCH INFO 2023-03-15 07:40:55,050 elastic_level: -1
+LAUNCH INFO 2023-03-15 07:40:55,050 elastic_timeout: 30
+LAUNCH INFO 2023-03-15 07:40:55,050 gloo_port: 6767
+LAUNCH INFO 2023-03-15 07:40:55,050 host: None
+LAUNCH INFO 2023-03-15 07:40:55,050 job_id: default
+LAUNCH INFO 2023-03-15 07:40:55,050 legacy: False
+LAUNCH INFO 2023-03-15 07:40:55,050 log_dir: log
+LAUNCH INFO 2023-03-15 07:40:55,050 log_level: INFO
+LAUNCH INFO 2023-03-15 07:40:55,050 master: None
+LAUNCH INFO 2023-03-15 07:40:55,050 max_restart: 3
+LAUNCH INFO 2023-03-15 07:40:55,050 nnodes: 1
+LAUNCH INFO 2023-03-15 07:40:55,050 nproc_per_node: None
+LAUNCH INFO 2023-03-15 07:40:55,050 rank: -1
+LAUNCH INFO 2023-03-15 07:40:55,051 run_mode: collective
+LAUNCH INFO 2023-03-15 07:40:55,051 server_num: None
+LAUNCH INFO 2023-03-15 07:40:55,051 servers: 
+LAUNCH INFO 2023-03-15 07:40:55,051 trainer_num: None
+LAUNCH INFO 2023-03-15 07:40:55,051 trainers: 
+LAUNCH INFO 2023-03-15 07:40:55,051 training_script: 0,1,2,3,4,5,6,7
+LAUNCH INFO 2023-03-15 07:40:55,051 training_script_args: ['tools/train.py', '-c', 'configs/semi_det/semi_detr/dino_ssod_gthr.yml', '--eval', '--use_vdl=true', '--vdl_log_dir=vdl_dir/thres']
+LAUNCH INFO 2023-03-15 07:40:55,051 with_gloo: 0
+LAUNCH INFO 2023-03-15 07:40:55,051 --------------------------------------------------
+LAUNCH WARNING 2023-03-15 07:40:55,051 Compatible mode enable with args ['--gpus']
+WARNING 2023-03-15 07:40:55,052 launch.py:519] Not found distinct arguments and compiled with cuda or xpu or npu or mlu. Default use collective mode
+WARNING 2023-03-15 07:40:55,052 launch.py:519] Not found distinct arguments and compiled with cuda or xpu or npu or mlu. Default use collective mode
+INFO 2023-03-15 07:40:55,054 launch_utils.py:561] Local start 8 processes. First process distributed environment info (Only For Debug): 
+    +=======================================================================================+
+    |                        Distributed Envs                      Value                    |
+    +---------------------------------------------------------------------------------------+
+    |                       PADDLE_TRAINER_ID                        0                      |
+    |                 PADDLE_CURRENT_ENDPOINT                 127.0.0.1:31847               |
+    |                     PADDLE_TRAINERS_NUM                        8                      |
+    |                PADDLE_TRAINER_ENDPOINTS  ... 0.1:18741,127.0.0.1:16729,127.0.0.1:47068|
+    |                     PADDLE_RANK_IN_NODE                        0                      |
+    |                 PADDLE_LOCAL_DEVICE_IDS                        0                      |
+    |                 PADDLE_WORLD_DEVICE_IDS                 0,1,2,3,4,5,6,7               |
+    |                     FLAGS_selected_gpus                        0                      |
+    |             FLAGS_selected_accelerators                        0                      |
+    +=======================================================================================+
+
+INFO 2023-03-15 07:40:55,054 launch_utils.py:561] Local start 8 processes. First process distributed environment info (Only For Debug): 
+    +=======================================================================================+
+    |                        Distributed Envs                      Value                    |
+    +---------------------------------------------------------------------------------------+
+    |                       PADDLE_TRAINER_ID                        0                      |
+    |                 PADDLE_CURRENT_ENDPOINT                 127.0.0.1:31847               |
+    |                     PADDLE_TRAINERS_NUM                        8                      |
+    |                PADDLE_TRAINER_ENDPOINTS  ... 0.1:18741,127.0.0.1:16729,127.0.0.1:47068|
+    |                     PADDLE_RANK_IN_NODE                        0                      |
+    |                 PADDLE_LOCAL_DEVICE_IDS                        0                      |
+    |                 PADDLE_WORLD_DEVICE_IDS                 0,1,2,3,4,5,6,7               |
+    |                     FLAGS_selected_gpus                        0                      |
+    |             FLAGS_selected_accelerators                        0                      |
+    +=======================================================================================+
+
+INFO 2023-03-15 07:40:55,055 launch_utils.py:566] details about PADDLE_TRAINER_ENDPOINTS can be found in log/endpoints.log, and detail running logs maybe found in log/workerlog.0
+INFO 2023-03-15 07:40:55,055 launch_utils.py:566] details about PADDLE_TRAINER_ENDPOINTS can be found in log/endpoints.log, and detail running logs maybe found in log/workerlog.0
+INFO 2023-03-17 11:07:38,452 launch_utils.py:343] terminate all the procs
+INFO 2023-03-17 11:07:38,452 launch_utils.py:343] terminate all the procs
+ERROR 2023-03-17 11:07:38,452 launch_utils.py:642] ABORT!!! Out of all 8 trainers, the trainer process with rank=[0, 1, 2, 3, 4, 5, 6, 7] was aborted. Please check its log.
+ERROR 2023-03-17 11:07:38,452 launch_utils.py:642] ABORT!!! Out of all 8 trainers, the trainer process with rank=[0, 1, 2, 3, 4, 5, 6, 7] was aborted. Please check its log.
+INFO 2023-03-17 11:07:42,456 launch_utils.py:343] terminate all the procs
+INFO 2023-03-17 11:07:42,456 launch_utils.py:343] terminate all the procs
+INFO 2023-03-17 11:07:42,456 launch.py:402] Local processes completed.
+INFO 2023-03-17 11:07:42,456 launch.py:402] Local processes completed.

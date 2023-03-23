@@ -1,0 +1,600 @@
+grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: import ppdet from source directory without installing, run 'python setup.py install' to install ppdet firstly
+I0314 18:05:52.445055 31399 gen_comm_id_helper.cc:205] Server listening on: 127.0.0.1:29658 successful.
+I0314 18:05:55.388417 31399 nccl_context.cc:83] init nccl context nranks: 8 local rank: 5 gpu id: 5 ring id: 0
+W0314 18:05:56.885354 31399 gpu_resources.cc:61] Please NOTE: device: 5, GPU Compute Capability: 6.1, Driver API Version: 10.2, Runtime API Version: 10.2
+W0314 18:05:56.889861 31399 gpu_resources.cc:91] device: 5, cuDNN Version: 7.6.
+loading annotations into memory...
+Done (t=0.96s)
+creating index...
+index created!
+loading annotations into memory...
+Done (t=0.42s)
+creating index...
+index created!
+Annotation file: dataset/coco/semi_annotations/instances_train2017.1@5-unlabeled.json does not contains ground truth and load image information only.
+W0314 18:06:15.962594 31399 reducer.cc:694] All parameters are involved in the backward pass. It is recommended to set find_unused_parameters to False to improve performance. However, if unused parameters appear in subsequent iterative training, then an error will occur. Please make it clear that in the subsequent training, there will be no parameters that are not used in the backward pass, and then set find_unused_parameters
+
+
+--------------------------------------
+C++ Traceback (most recent call last):
+--------------------------------------
+0   paddle::imperative::BasicEngine::Execute()
+1   paddle::imperative::GradientAccumulator::CallReduceHooks()
+2   paddle::imperative::Reducer::AddDistHook(unsigned long)
+3   paddle::imperative::Reducer::MarkVarReady(unsigned long, bool)
+4   paddle::imperative::Reducer::MarkGroupReady(unsigned long)
+5   paddle::imperative::Reducer::FusedAllReduceSchedule(int, paddle::imperative::Group&, int)
+6   paddle::imperative::Group::ConcatTensors(phi::DeviceContext const&)
+7   paddle::operators::math::ConcatFunctor<paddle::platform::CUDADeviceContext, float>::operator()(paddle::platform::CUDADeviceContext const&, std::vector<phi::DenseTensor, std::allocator<phi::DenseTensor> > const&, int, phi::DenseTensor*)
+8   phi::funcs::ConcatFunctor<phi::GPUContext, float>::operator()(phi::GPUContext const&, std::vector<phi::DenseTensor, std::allocator<phi::DenseTensor> > const&, int, phi::DenseTensor*)
+9   void paddle::memory::Copy<phi::Place, phi::CPUPlace>(phi::Place, void*, phi::CPUPlace, void const*, unsigned long, void*)
+10  void paddle::memory::Copy<phi::Place, phi::Place>(phi::Place, void*, phi::Place, void const*, unsigned long, void*)
+11  void paddle::memory::Copy<phi::GPUPlace, phi::CPUPlace>(phi::GPUPlace, void*, phi::CPUPlace, void const*, unsigned long, void*)
+12  phi::backends::gpu::GpuMemcpyAsync(void*, void const*, unsigned long, cudaMemcpyKind, CUstream_st*)
+
+----------------------
+Error Message Summary:
+----------------------
+FatalError: `Termination signal` is detected by the operating system.
+  [TimeInfo: *** Aborted at 1678817330 (unix time) try "date -d @1678817330" if you are using GNU date ***]
+  [SignalInfo: *** SIGTERM (@0x7a55) received by PID 31399 (TID 0x7f4791a8e700) from PID 31317 ***]
+
+grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: import ppdet from source directory without installing, run 'python setup.py install' to install ppdet firstly
+I0314 18:11:57.201278 15918 gen_comm_id_helper.cc:205] Server listening on: 127.0.0.1:18356 successful.
+I0314 18:12:00.114894 15918 nccl_context.cc:83] init nccl context nranks: 8 local rank: 5 gpu id: 5 ring id: 0
+W0314 18:12:01.618350 15918 gpu_resources.cc:61] Please NOTE: device: 5, GPU Compute Capability: 6.1, Driver API Version: 10.2, Runtime API Version: 10.2
+W0314 18:12:01.622829 15918 gpu_resources.cc:91] device: 5, cuDNN Version: 7.6.
+loading annotations into memory...
+Done (t=0.99s)
+creating index...
+index created!
+loading annotations into memory...
+Done (t=0.43s)
+creating index...
+index created!
+Annotation file: dataset/coco/semi_annotations/instances_train2017.1@5-unlabeled.json does not contains ground truth and load image information only.
+W0314 18:12:20.663019 15918 reducer.cc:694] All parameters are involved in the backward pass. It is recommended to set find_unused_parameters to False to improve performance. However, if unused parameters appear in subsequent iterative training, then an error will occur. Please make it clear that in the subsequent training, there will be no parameters that are not used in the backward pass, and then set find_unused_parameters
+grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: import ppdet from source directory without installing, run 'python setup.py install' to install ppdet firstly
+I0315 07:40:59.357707  5275 gen_comm_id_helper.cc:205] Server listening on: 127.0.0.1:18741 successful.
+I0315 07:41:02.156728  5275 nccl_context.cc:83] init nccl context nranks: 8 local rank: 5 gpu id: 5 ring id: 0
+W0315 07:41:03.796538  5275 gpu_resources.cc:61] Please NOTE: device: 5, GPU Compute Capability: 6.1, Driver API Version: 10.2, Runtime API Version: 10.2
+W0315 07:41:03.801064  5275 gpu_resources.cc:91] device: 5, cuDNN Version: 7.6.
+loading annotations into memory...
+Done (t=0.96s)
+creating index...
+index created!
+loading annotations into memory...
+Done (t=0.43s)
+creating index...
+index created!
+Annotation file: dataset/coco/semi_annotations/instances_train2017.1@5-unlabeled.json does not contains ground truth and load image information only.
+W0315 07:41:22.370951  5275 reducer.cc:694] All parameters are involved in the backward pass. It is recommended to set find_unused_parameters to False to improve performance. However, if unused parameters appear in subsequent iterative training, then an error will occur. Please make it clear that in the subsequent training, there will be no parameters that are not used in the backward pass, and then set find_unused_parameters
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000356941.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    label_samples = next(self.label_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    data = f(data)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000356941.jpg'
+
+fail to map sample transform [Decode_31872d] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000471468.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 461, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    data = f(data)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000471468.jpg'
+
+Exception in thread Thread-331:
+Traceback (most recent call last):
+  File "/usr/local/python3.7.0/lib/python3.7/threading.py", line 917, in _bootstrap_inner
+    self.run()
+  File "/usr/local/python3.7.0/lib/python3.7/threading.py", line 865, in run
+    self._target(*self._args, **self._kwargs)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 534, in _thread_loop
+    batch = self._get_data()
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 671, in _get_data
+    batch.reraise()
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/worker.py", line 169, in reraise
+    raise self.exc_type(msg)
+FileNotFoundError: DataLoader worker(1) caught FileNotFoundError with message:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 461, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/worker.py", line 336, in _worker_loop
+    batch = fetcher.fetch(indices)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/fetcher.py", line 121, in fetch
+    data.append(self.dataset[idx])
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/source/coco.py", line 587, in __getitem__
+    return self.transform(roidb)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 353, in __call__
+    raise e
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    data = f(data)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000471468.jpg'
+
+
+Exception in thread Thread-330:
+Traceback (most recent call last):
+  File "/usr/local/python3.7.0/lib/python3.7/threading.py", line 917, in _bootstrap_inner
+    self.run()
+  File "/usr/local/python3.7.0/lib/python3.7/threading.py", line 865, in run
+    self._target(*self._args, **self._kwargs)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 534, in _thread_loop
+    batch = self._get_data()
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 671, in _get_data
+    batch.reraise()
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/worker.py", line 169, in reraise
+    raise self.exc_type(msg)
+FileNotFoundError: DataLoader worker(1) caught FileNotFoundError with message:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    label_samples = next(self.label_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/worker.py", line 336, in _worker_loop
+    batch = fetcher.fetch(indices)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/fetcher.py", line 121, in fetch
+    data.append(self.dataset[idx])
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/source/coco.py", line 587, in __getitem__
+    return self.transform(roidb)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 353, in __call__
+    raise e
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    data = f(data)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000356941.jpg'
+
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000422870.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    label_samples = next(self.label_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    data = f(data)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000422870.jpg'
+
+fail to map sample transform [Decode_31872d] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000449424.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 461, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    data = f(data)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000449424.jpg'
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000005345.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000005345.jpg'
+
+fail to map sample transform [Decode_31872d] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000567609.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 461, in __iter__
+    label_samples[0],  # sup weak
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 773, in __next__
+    six.reraise(*sys.exc_info())
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000567609.jpg'
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000563457.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000563457.jpg'
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000443509.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000443509.jpg'
+
+Exception in thread Thread-332:
+Traceback (most recent call last):
+  File "/usr/local/python3.7.0/lib/python3.7/threading.py", line 917, in _bootstrap_inner
+    self.run()
+  File "/usr/local/python3.7.0/lib/python3.7/threading.py", line 865, in run
+    self._target(*self._args, **self._kwargs)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 534, in _thread_loop
+    batch = self._get_data()
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 671, in _get_data
+    batch.reraise()
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/worker.py", line 169, in reraise
+    raise self.exc_type(msg)
+FileNotFoundError: DataLoader worker(2) caught FileNotFoundError with message:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/worker.py", line 336, in _worker_loop
+    batch = fetcher.fetch(indices)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/fetcher.py", line 121, in fetch
+    data.append(self.dataset[idx])
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/source/coco.py", line 587, in __getitem__
+    return self.transform(roidb)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 353, in __call__
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000563457.jpg'
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000146049.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000146049.jpg'
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000125180.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000125180.jpg'
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000509700.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000509700.jpg'
+Traceback (most recent call last):
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000252203.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000252203.jpg'
+
+
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "tools/train.py", line 205, in <module>
+  File "tools/train.py", line 201, in main
+    if __name__ == "__main__":
+  File "tools/train.py", line 154, in run
+
+    def main():
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/engine/trainer_ssod.py", line 247, in train
+    
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 590, in __next__
+    
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 458, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000254046.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000254046.jpg'
+
+fail to map sample transform [Decode_fc74fc] with error: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000202402.jpg' and stack:
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 455, in __iter__
+    unlabel_samples = next(self.unlabel_loader_iter)
+  File "/usr/local/python3.7.0/lib/python3.7/site-packages/paddle/fluid/dataloader/dataloader_iter.py", line 746, in __next__
+    data = self._reader.read_next_var_list()
+SystemError: (Fatal) Blocking queue is killed because the data reader raises an exception.
+  [Hint: Expected killed_ != true, but received killed_:1 == true:1.] (at /paddle/paddle/fluid/operators/reader/blocking_queue.h:166)
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/reader.py", line 347, in __call__
+    except Exception as e:
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 105, in __call__
+    sample = self.apply(sample, context)
+  File "/workspace/zhaokang/SSOD/PaddleDetection/ppdet/data/transform/operators.py", line 122, in apply
+    with open(sample['im_file'], 'rb') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'dataset/coco/train2017/000000202402.jpg'
+
+grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: import ppdet from source directory without installing, run 'python setup.py install' to install ppdet firstly
+I0319 13:08:36.686100  7463 gen_comm_id_helper.cc:205] Server listening on: 127.0.0.1:25676 successful.
+I0319 13:08:39.692515  7463 nccl_context.cc:83] init nccl context nranks: 8 local rank: 5 gpu id: 5 ring id: 0
+W0319 13:08:41.258670  7463 gpu_resources.cc:61] Please NOTE: device: 5, GPU Compute Capability: 6.1, Driver API Version: 10.2, Runtime API Version: 10.2
+W0319 13:08:41.263253  7463 gpu_resources.cc:91] device: 5, cuDNN Version: 7.6.
+Config dataset_dir dataset/coco is not exits, dataset config is not valid
+Dataset /workspace/dataset/coco is not valid for reason above, try searching /root/.cache/paddle/dataset or downloading dataset...
+
+
+--------------------------------------
+C++ Traceback (most recent call last):
+--------------------------------------
+No stack trace in paddle, may be caused by external reasons.
+
+----------------------
+Error Message Summary:
+----------------------
+FatalError: `Termination signal` is detected by the operating system.
+  [TimeInfo: *** Aborted at 1679231441 (unix time) try "date -d @1679231441" if you are using GNU date ***]
+  [SignalInfo: *** SIGTERM (@0x1cd8) received by PID 7463 (TID 0x7f8c03481700) from PID 7384 ***]
+
+grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: Unable to use numba in PP-Tracking, please install numba, for example(python3.7): `pip install numba==0.56.4`
+Warning: import ppdet from source directory without installing, run 'python setup.py install' to install ppdet firstly
+I0319 13:12:46.328747  8414 gen_comm_id_helper.cc:205] Server listening on: 127.0.0.1:22931 successful.
+I0319 13:12:49.300405  8414 nccl_context.cc:83] init nccl context nranks: 8 local rank: 5 gpu id: 5 ring id: 0
+W0319 13:12:50.850540  8414 gpu_resources.cc:61] Please NOTE: device: 5, GPU Compute Capability: 6.1, Driver API Version: 10.2, Runtime API Version: 10.2
+W0319 13:12:50.855485  8414 gpu_resources.cc:91] device: 5, cuDNN Version: 7.6.
+loading annotations into memory...
+Done (t=2.00s)
+creating index...
+index created!
+loading annotations into memory...
+Done (t=0.46s)
+creating index...
+index created!
+Annotation file: dataset/coco/semi_annotations/instances_train2017.1@10-unlabeled.json does not contains ground truth and load image information only.
+W0319 13:13:12.023578  8414 reducer.cc:694] All parameters are involved in the backward pass. It is recommended to set find_unused_parameters to False to improve performance. However, if unused parameters appear in subsequent iterative training, then an error will occur. Please make it clear that in the subsequent training, there will be no parameters that are not used in the backward pass, and then set find_unused_parameters
+
+
+--------------------------------------
+C++ Traceback (most recent call last):
+--------------------------------------
+No stack trace in paddle, may be caused by external reasons.
+
+----------------------
+Error Message Summary:
+----------------------
+FatalError: `Termination signal` is detected by the operating system.
+  [TimeInfo: *** Aborted at 1679231639 (unix time) try "date -d @1679231639" if you are using GNU date ***]
+  [SignalInfo: *** SIGTERM (@0x208f) received by PID 8414 (TID 0x7f7cd169d700) from PID 8335 ***]
+
