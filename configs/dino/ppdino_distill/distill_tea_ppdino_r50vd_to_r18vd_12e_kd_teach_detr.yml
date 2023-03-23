@@ -82,4 +82,4 @@ distill_loss: KDDETRLoss
 KDDETRLoss:
   kd_hs: False
   kd_reference: True #False
-  kd_enc: False #False
+  kd_enc: True #False
