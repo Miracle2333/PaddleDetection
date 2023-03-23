@@ -265,18 +265,10 @@ class DETR_SSOD(MultiSteamDetector):
             out_transformer = self.student.transformer(body_feats,student_unsup)
             losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
   
-            losses['loss_class']*=0
-            losses['loss_bbox']*=0
-            losses['loss_giou']*=0
-            losses['loss_class_aux']*=0
-            losses['loss_bbox_aux']*=0
-            losses['loss_giou_aux']*=0
-            losses['loss_class_dn']*=0
-            losses['loss_bbox_dn']*=0
-            losses['loss_giou_dn']*=0
-            losses['loss_class_aux_dn']*=0
-            losses['loss_bbox_aux_dn']*=0
-            losses['loss_giou_aux_dn']*=0
+            for k,v in losses.items():
+                losses[k]=v*0.0
+            print(losses)
+            
         else:
             gt_bbox=[]
             gt_class=[]

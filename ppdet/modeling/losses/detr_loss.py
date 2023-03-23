@@ -135,8 +135,8 @@ class DETRLoss_semi(nn.Layer):
         src_score, target_score = self._get_src_target_assign(iou_scores, gt_ious,
                                                             match_indices)   
  
-        iou=self.iou( bbox_cxcywh_to_xyxy(src_bbox), bbox_cxcywh_to_xyxy(target_bbox))
-        loss[name_iou]=self.loss_coeff['bbox']*F.binary_cross_entropy(src_score, target_score,reduction='none').mean()/ num_gts
+        # iou=self.iou( bbox_cxcywh_to_xyxy(src_bbox), bbox_cxcywh_to_xyxy(target_bbox))
+        loss[name_iou]=F.binary_cross_entropy(src_score, target_score,reduction='none').sum()/ num_gts
         loss[name_bbox] = self.loss_coeff['bbox'] * F.l1_loss(
             src_bbox, target_bbox, reduction='sum') / num_gts
         loss[name_giou] = self.giou_loss(
@@ -446,7 +446,7 @@ class DETRLoss(nn.Layer):
                                                             match_indices)   
  
         iou=self.iou( bbox_cxcywh_to_xyxy(src_bbox), bbox_cxcywh_to_xyxy(target_bbox))
-        loss[name_iou]=self.loss_coeff['bbox']*F.binary_cross_entropy(src_score, iou,reduction='none').mean()/ num_gts
+        loss[name_iou]=F.binary_cross_entropy(src_score, iou,reduction='none').sum()/ num_gts
         loss[name_bbox] = self.loss_coeff['bbox'] * F.l1_loss(
             src_bbox, target_bbox, reduction='sum') / num_gts
         loss[name_giou] = self.giou_loss(
