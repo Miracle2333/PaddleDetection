@@ -722,7 +722,7 @@ class DETRBBoxSemiPostProcess(object):
         bbox_pred = bboxes
 
             
-        scores = F.softmax(logits,axis=2)
+        scores = F.sigmoid(logits)
 
         import copy
         soft_scores=copy.deepcopy(scores)

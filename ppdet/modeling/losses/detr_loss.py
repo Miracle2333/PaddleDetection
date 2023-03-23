@@ -149,13 +149,9 @@ class DETRLoss(nn.Layer):
                 mask= (target_label==(target_label.max(-1).unsqueeze(-1).tile([1,1,80]))).astype('int32') * (target_label>0).astype('int32')    
                 target_score = target_score.reshape(
                     [bs, num_query_objects, 1]) * mask.astype('float32')
-            loss_ = self.loss_coeff['class'] * varifocal_loss_with_logits(
-            logits, target_score, target_label,
-            num_gts / num_query_objects)
-            if self.use_focal_loss:
-                if iou_score is not None and self.use_vfl:
-                    loss_ = self.loss_coeff['class'] * sigmoid_focal_loss(
-                        logits, target_label, num_gts / num_query_objects)
+                loss_ = self.loss_coeff['class'] * varifocal_loss_with_logits(
+                    logits, target_score.max(-1).unsqueeze(-1).tile([1,1,80]), target_label,
+                    num_gts / num_query_objects)
         else:
             loss_ = paddle.to_tensor([0.])
                 

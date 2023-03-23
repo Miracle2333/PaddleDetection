@@ -206,12 +206,12 @@ TestDataset:
 epoch: 180 #epoch: 60
 
 LearningRate:
-  base_lr: 0.0001
+  base_lr: 0.0002
   schedulers:
   - !PiecewiseDecay
     gamma: 1.0
     milestones: [180]
-    use_warmup: true
+    use_warmup: false
   - !LinearWarmup
     start_factor: 0.001
     steps: 2000
