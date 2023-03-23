@@ -267,7 +267,7 @@ class DETR_SSOD(MultiSteamDetector):
   
             for k,v in losses.items():
                 losses[k]=v*0.0
-            print(losses)
+            # print(losses)
             
         else:
             gt_bbox=[]
