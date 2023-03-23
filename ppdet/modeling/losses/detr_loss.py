@@ -124,10 +124,10 @@ class DETRLoss(nn.Layer):
                     [bs, num_query_objects, 1]) * target_label
                 loss_ = self.loss_coeff['class'] * varifocal_loss_with_logits(
                     logits, target_score, target_label,
-                    num_gts / num_query_objects)
+                    num_gts / num_query_objects, loss_weight=loss_weight)
             else:
                 loss_ = self.loss_coeff['class'] * sigmoid_focal_loss(
-                    logits, target_label, num_gts / num_query_objects)
+                    logits, target_label, num_gts / num_query_objects, loss_weight=loss_weight)
         else:
             loss_ = F.cross_entropy(
                 logits, target_label, weight=self.loss_coeff['class'])

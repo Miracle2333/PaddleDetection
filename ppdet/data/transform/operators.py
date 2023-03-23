@@ -1001,17 +1001,17 @@ class Resize(BaseOperator):
                                                 [im_scale_x, im_scale_y],
                                                 [resize_w, resize_h])
         
+        # apply areas
+        if 'gt_areas' in sample:
+            sample['gt_areas'] = self.apply_area(sample['gt_areas'],
+                                                 [im_scale_x, im_scale_y])
+        
         # apply bbox
         if 'proposal_bbox' in sample and len(sample['proposal_bbox']) > 0:
             for i in range(len(sample['proposal_bbox'])):
                 sample['proposal_bbox'][i] = self.apply_bbox(
                     sample['proposal_bbox'][i], [im_scale_x, im_scale_y],
                     [resize_w, resize_h])
-
-        # apply areas
-        if 'gt_areas' in sample:
-            sample['gt_areas'] = self.apply_area(sample['gt_areas'],
-                                                 [im_scale_x, im_scale_y])
 
         # apply polygon
         if 'gt_poly' in sample and len(sample['gt_poly']) > 0:
@@ -2096,7 +2096,7 @@ class BboxXYXY2XYWH(BaseOperator):
             for i in range(len(sample['proposal_bbox'])):
                 proposal = sample['proposal_bbox'][i]
                 proposal[:, 2:4] = proposal[:, 2:4] - proposal[:, :2]
-                proposal[:, :2] = proposal[:, :2] + proposal[:, 2:4] / 2.
+                proposal[:, :2] = proposal[:, :2] + proposal[:, 2:4] / 2
                 sample['proposal_bbox'][i] = proposal
         return sample
 
