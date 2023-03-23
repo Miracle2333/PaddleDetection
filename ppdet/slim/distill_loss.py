@@ -32,17 +32,9 @@ from ppdet.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 __all__ = [
-    'DistillYOLOv3Loss',
-    'KnowledgeDistillationKLDivLoss',
-    'DistillPPYOLOELoss',
-    'FGDFeatureLoss',
-    'CWDFeatureLoss',
-    'PKDFeatureLoss',
-    'MGDFeatureLoss',
-    'DistillDETRLoss',
-    'DistillDINOLoss',
-    'DistillPPDINOLoss',
-    'KDDETRLoss',
+    'DistillYOLOv3Loss', 'KnowledgeDistillationKLDivLoss', 'DistillPPYOLOELoss',
+    'FGDFeatureLoss', 'CWDFeatureLoss', 'PKDFeatureLoss', 'MGDFeatureLoss',
+    'DistillDETRLoss', 'DistillDINOLoss'
 ]
 
 
@@ -478,203 +470,6 @@ class CWDFeatureLoss(nn.Layer):
         loss = paddle.sum(-softmax_pred_t * paddle.log(eps + softmax_pred_s) +
                           softmax_pred_t * paddle.log(eps + softmax_pred_t))
         return self.loss_weight * loss / (C * N)
-
-
-#from IPython import embed
-from ppdet.modeling.transformers.utils import bbox_cxcywh_to_xyxy
-from ppdet.modeling.transformers.matchers import BiMatcher
-from ppdet.modeling.bbox_utils import bbox_iou
-from ppdet.modeling.ssod.utils import QFLv2
-@register
-class DistillPPDINOLoss(nn.Layer):
-    def __init__(
-            self,
-            loss_weight={'logits': 1.0,
-                         'feat': 20.0},
-            logits_distill=False,
-            feat_distill=True,
-            feat_distiller='aafd',
-            feat_distill_place='proj_feats',
-            student_channels=[512, 1024, 2048], # r50
-            teacher_channels=[384, 768, 1536]): # swin-L-384
-        super(DistillPPDINOLoss, self).__init__()
-        self.loss_weight_logits = loss_weight['logits']
-        self.loss_weight_feat = loss_weight['feat']
-        self.logits_distill = logits_distill
-        self.feat_distill = feat_distill
-
-        self.bimatcher = BiMatcher() ###
-
-        self.bce_loss = nn.BCELoss(reduction='mean')
-        self.giou_loss = GIoULoss()
-
-        self.mse_loss = nn.MSELoss(reduction='none')
-
-        self.feat_distiller = feat_distiller
-        if feat_distill and self.loss_weight_feat > 0:
-            assert feat_distiller in ['aafd', 'cwd', 'fgd', 'pkd', 'mgd', 'mimic']
-            assert feat_distill_place in ['backbone_feats', 'neck_feats', 'proj_feats']
-            self.feat_distill_place = feat_distill_place
-
-            if feat_distiller in ['cwd', 'fgd', 'pkd', 'mgd', 'mimic']:
-                self.distill_feat_loss_modules = []
-                for i in range(len(student_channels)):
-                    if feat_distiller == 'fgd':
-                        feat_loss_module = FGDFeatureLoss(
-                            student_channels[i],
-                            teacher_channels[i],
-                            normalize=True,
-                            alpha_fgd=0.00001,
-                            beta_fgd=0.000005,
-                            gamma_fgd=0.00001,
-                            lambda_fgd=0.00000005)
-                    elif feat_distiller == 'mimic':
-                        feat_loss_module = MimicFeatureLoss(
-                            student_channels[i],
-                            teacher_channels[i], 
-                            normalize=True)
-                    else:
-                        raise ValueError
-                    self.distill_feat_loss_modules.append(feat_loss_module)
-
-    def _get_from_matching(self, src, target, match_indices):
-        src_assign = paddle.concat([
-            paddle.gather(
-                t, I, axis=0) if len(I) > 0 else paddle.zeros([0, t.shape[-1]])
-            for t, (I, _) in zip(src, match_indices)
-        ])
-        target_assign = paddle.concat([
-            paddle.gather(
-                t, J, axis=0) if len(J) > 0 else paddle.zeros([0, t.shape[-1]])
-            for t, (_, J) in zip(target, match_indices)
-        ])
-        return src_assign, target_assign
-
-    def _logits_loss(self, teacher_distill_pairs, student_distill_pairs, teacher_loss_distill_pairs):
-        tea_bboxes = teacher_distill_pairs['out_bboxes_kd']
-        tea_logits = teacher_distill_pairs['out_logits_kd']
-        stu_bboxes = student_distill_pairs['out_bboxes_kd']
-        stu_logits = student_distill_pairs['out_logits_kd']
-        K, bs, M, _ = tea_bboxes.shape
-        K, bs, N, _ = stu_bboxes.shape
-        assert M >= N
-
-        loss_instance = paddle.zeros([1])
-        loss_relation = paddle.zeros([1])
-        aa, beta, yy = 1, 2, 5
-        for i in range(K):
-            match_indices = self.bimatcher( # [2, 300, 4]
-                tea_bboxes[i].detach(), stu_bboxes[i].detach(), tea_logits[i].detach(), stu_logits[i].detach())
-
-            tea_bboxes_match, stu_bboxes_match = self._get_from_matching(
-                tea_bboxes[-1].detach(), stu_bboxes[i], match_indices)
-            tea_logits_match, stu_logits_match = self._get_from_matching(
-                tea_logits[-1].detach(), stu_logits[i], match_indices)
-
-            #loss_cls = self.bce_loss(F.sigmoid(stu_logits_match), F.sigmoid(tea_logits_match))
-            loss_cls = F.binary_cross_entropy(F.sigmoid(stu_logits_match), F.sigmoid(tea_logits_match)) # reduction='mean'
-            #loss_cls = QFLv2(F.sigmoid(stu_logits_match), F.sigmoid(tea_logits_match)) # reduction='mean'
-
-            # tea_bboxes_match_xyxy = bbox_cxcywh_to_xyxy(tea_bboxes_match)
-            # stu_bboxes_match_xyxy = bbox_cxcywh_to_xyxy(stu_bboxes_match)
-            # giou = bbox_iou(
-            #         tea_bboxes_match_xyxy.split(4, -1),
-            #         stu_bboxes_match_xyxy.split(4, -1), giou=True)
-            # loss_giou = (1.0 - giou).mean()
-            #loss_giou = self.giou_loss(tea_bboxes_match, stu_bboxes_match)
-
-            #loss_l1 = F.l1_loss(tea_bboxes_match_xyxy, stu_bboxes_match_xyxy)
-            #loss_l1 = F.l1_loss(tea_bboxes_match, stu_bboxes_match)
-
-            # Compute the giou cost betwen boxes
-            loss_giou = self.giou_loss(
-                bbox_cxcywh_to_xyxy(stu_bboxes_match),
-                bbox_cxcywh_to_xyxy(tea_bboxes_match)).mean()
-
-            # Compute the L1 cost between boxes
-            loss_l1 = (stu_bboxes_match - tea_bboxes_match).abs().mean()
-
-            loss_instance_k = aa * loss_cls + beta * loss_giou + yy * loss_l1
-            # 1:2:5
-            loss_instance += loss_instance_k
-
-
-            # loss_relation_k = 
-            # loss_relation += loss_relation_k
-
-        logits_loss = loss_instance + loss_relation
-        return logits_loss
-
-    def _aafd_feat_loss(self, teacher_distill_pairs, student_distill_pairs):
-        gamma = 0.5
-        stu_feats = student_distill_pairs['feat_flatten'] # [bs, hw, d]
-        tea_feats = teacher_distill_pairs['feat_flatten'] # [bs, hw, d]
-        tea_proj_queries = teacher_distill_pairs['proj_queries'] # [bs, M, d]
-        bs, hw, d = stu_feats.shape
-        bs, M, d = tea_proj_queries.shape
-
-        soft_mask = F.sigmoid(paddle.matmul(tea_proj_queries, tea_feats.transpose([0, 2, 1])))
-        # soft_mask.shape [2, 300, 8500] # [bs, M, hw]
-        # tea_feats.shape [2, 8500, 256] # [bs, hw, d]
-        loss_mimic = self.mse_loss(paddle.matmul(soft_mask, stu_feats), paddle.matmul(soft_mask, tea_feats)) # [2, 300, 256]
-
-        tea_bboxes = teacher_distill_pairs['out_bboxes_kd'][-1]
-        tea_logits = teacher_distill_pairs['out_logits_kd'][-1]
-        stu_bboxes = student_distill_pairs['out_bboxes_kd'][-1]
-        stu_logits = student_distill_pairs['out_logits_kd'][-1]
-        match_indices = self.bimatcher( # [2, 300, 4]
-            tea_bboxes.detach(), stu_bboxes.detach())
-        tea_bboxes_match, stu_bboxes_match = self._get_from_matching(
-            tea_bboxes.detach(), stu_bboxes.detach(), match_indices)
-        tea_logits_match, stu_logits_match = self._get_from_matching(
-            tea_logits.detach(), stu_logits, match_indices)
-
-        scores = F.softmax(tea_logits_match).max(-1).unsqueeze(-1)
-        tea_bboxes_match_xyxy = bbox_cxcywh_to_xyxy(tea_bboxes_match)
-        stu_bboxes_match_xyxy = bbox_cxcywh_to_xyxy(stu_bboxes_match)
-        iou_score = bbox_iou(
-                tea_bboxes_match_xyxy.split(4, -1),
-                stu_bboxes_match_xyxy.split(4, -1))
-        q_score = scores.pow(gamma) * iou_score.pow(1 - gamma)
-        q_score = q_score.reshape([-1, M, 1])
-
-        feat_loss = q_score * loss_mimic
-        feat_loss = feat_loss.sum() / (d * hw * M * bs)
-
-        return feat_loss
-
-    def forward(self, teacher_model, student_model):
-        teacher_distill_pairs = teacher_model.transformer.distill_pairs
-        student_distill_pairs = student_model.transformer.distill_pairs
-
-        teacher_loss_distill_pairs = teacher_model.detr_head.loss.distill_pairs
-
-        if self.logits_distill and self.loss_weight_logits > 0:
-            logits_loss = self._logits_loss(teacher_distill_pairs, student_distill_pairs, teacher_loss_distill_pairs)  
-        else:
-            logits_loss = paddle.zeros([1])
-        
-        if self.feat_distill and self.loss_weight_feat > 0:
-            if self.feat_distiller == 'aafd':
-                feat_loss = self._aafd_feat_loss(teacher_distill_pairs, student_distill_pairs)
-            else:
-                feat_loss_list = []
-                inputs = student_model.inputs
-                assert 'gt_bbox' in inputs
-                assert self.feat_distill_place in student_distill_pairs
-                assert self.feat_distill_place in teacher_distill_pairs
-                stu_feats = student_distill_pairs[self.feat_distill_place]
-                tea_feats = teacher_distill_pairs[self.feat_distill_place]
-                for i, loss_module in enumerate(self.distill_feat_loss_modules):
-                    feat_loss_list.append(
-                        loss_module(stu_feats[i], tea_feats[i], inputs))
-                feat_loss = paddle.add_n(feat_loss_list)
-        else:
-            feat_loss = paddle.zeros([1])
-
-        student_model.transformer.distill_pairs.clear()
-        teacher_model.transformer.distill_pairs.clear()
-        return logits_loss * self.loss_weight_logits, feat_loss * self.loss_weight_feat
 
 
 @register
@@ -1146,13 +941,18 @@ class DistillDETRLoss(DETRLoss):
         loss_class = []
         loss_bbox = []
         loss_giou = []
+        if dn_match_indices is not None:
+            match_indices = dn_match_indices
+        elif self.use_same_match:
+            match_indices = self.matcher(boxes_t[self.same_match_ind],
+                                         logits_t[self.same_match_ind], gt_bbox,
+                                         gt_class)
+
         for aux_boxes, aux_logits, aux_boxes_t, aux_logits_t in zip(
                 boxes, logits, boxes_t, logits_t):
-            if dn_match_indices is None:
+            if not self.use_same_match and dn_match_indices is None:
                 match_indices = self.matcher(aux_boxes_t, aux_logits_t, gt_bbox,
                                              gt_class)
-            else:
-                match_indices = dn_match_indices
             if self.use_vfl:
                 if sum(len(a) for a in gt_bbox) > 0:
                     src_bbox, target_bbox = self._get_src_target_assign(
@@ -1295,15 +1095,11 @@ class DistillDINOLoss(DistillDETRLoss):
                 **kwargs):
 
         if dn_meta is not None:
-            dn_out_bboxes, boxes = paddle.split(
-                boxes, dn_meta['dn_num_split'], axis=2)
-            dn_out_logits, logits = paddle.split(
-                logits, dn_meta['dn_num_split'], axis=2)
+            _, boxes = paddle.split(boxes, dn_meta['dn_num_split'], axis=2)
+            _, logits = paddle.split(logits, dn_meta['dn_num_split'], axis=2)
             _, boxes_t = paddle.split(boxes_t, dn_meta['dn_num_split'], axis=2)
             _, logits_t = paddle.split(
                 logits_t, dn_meta['dn_num_split'], axis=2)
-        else:
-            dn_out_bboxes, dn_out_logits = None, None
 
         # for distill, do not using dino loss and proposal loss
         total_loss = super(DistillDINOLoss, self).forward(
@@ -1316,174 +1112,3 @@ class DistillDINOLoss(DistillDETRLoss):
             postfix=postfix)
 
         return total_loss
-
-
-from ppdet.modeling.transformers.utils import bbox_cxcywh_to_xyxy
-#from IPython import embed
-@register
-class KDDETRLoss(nn.Layer):
-    """ This class computes the loss for Conditional DETR.
-    The process happens in two steps:
-        1) we compute hungarian assignment between ground truth boxes and the outputs of the model
-        2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
-    """
-    def __init__(self,
-                 kd_hs=False,
-                 kd_reference=False,
-                 kd_enc=False):
-        super().__init__()
-        self.T = 10
-        self.weight_dict = {}
-        self.giou_loss = GIoULoss()
-
-        self.loss_kd_auxrf_cls = self.loss_kl_div
-        self.loss_kd_auxrf_box = self.loss_boxes 
-        self.weight_dict.update({'loss_kd_auxrf_cls':1})
-        self.weight_dict.update({'loss_kd_auxrf_bbox':5})
-        self.weight_dict.update({'loss_kd_auxrf_giou':2})
-
-        if kd_hs:
-            self.kd_hs = True
-            self.loss_kd_hs = self.loss_mse
-            self.weight_dict.update({'loss_kd_hs': 1})
-        else:
-            self.kd_hs = False
-
-        if kd_reference:
-            self.kd_reference = True
-            self.loss_kd_reference = self.loss_mse
-            self.weight_dict.update({'loss_kd_reference':1})
-        else:
-            self.kd_reference = False
-
-        if kd_enc:
-            self.kd_enc = True
-            self.loss_kd_enc_cls = self.loss_kl_div
-            self.loss_kd_enc_box = self.loss_boxes 
-            self.loss_kd_enc_memory = self.loss_mse
-            self.weight_dict.update({'loss_kd_enc_cls':1})
-            self.weight_dict.update({'loss_kd_enc_bbox':5})
-            self.weight_dict.update({'loss_kd_enc_giou':2})
-            self.weight_dict.update({'loss_kd_enc_memory':0.01})
-        else:
-            self.kd_enc = False
-
-    def forward(self, student_model, teacher_model):
-        outputs = student_model.transformer.distill_pairs
-        soft_targets = teacher_model.transformer.distill_pairs
-
-        losses = {}
-        # weight = soft_targets['pred_logits'].flatten(0, 1)
-        # weight = weight.sigmoid().max(1)[0].detach()
-        weight = soft_targets['pred_logits'] # [2, 900, 80]
-        weight = F.sigmoid(soft_targets['pred_logits']).max(2).detach() # [2, 900]
-        weight = weight.flatten() # [1800]
- 
-        loss_kd_auxrf_cls = self.loss_kd_auxrf_cls(
-            outputs['aux_pred_logits'], soft_targets['pred_logits'], weight) # [2, 900, 80]
-        loss_tmp = self.loss_kd_auxrf_box(
-            outputs['aux_pred_boxes'], soft_targets['pred_boxes'], weight) # [2, 900, 4]
-        loss_kd_auxrf_bbox = loss_tmp['loss_bbox']
-        loss_kd_auxrf_giou = loss_tmp['loss_giou']
-
-        for aux_output_pred_logits, aux_output_pred_boxes in zip(outputs['auxrf_aux_outputs']['pred_logits'], outputs['auxrf_aux_outputs']['pred_boxes']):
-            loss_kd_auxrf_cls += self.loss_kd_auxrf_cls(
-                aux_output_pred_logits, soft_targets['pred_logits'], weight)
-            loss_tmp = self.loss_kd_auxrf_box(
-                aux_output_pred_boxes, soft_targets['pred_boxes'], weight)
-            loss_kd_auxrf_bbox += loss_tmp['loss_bbox']
-            loss_kd_auxrf_giou += loss_tmp['loss_giou']
-
-        losses.update(dict(loss_kd_auxrf_cls=loss_kd_auxrf_cls,
-                           loss_kd_auxrf_bbox=loss_kd_auxrf_bbox,
-                           loss_kd_auxrf_giou=loss_kd_auxrf_giou))
-
-        if self.kd_hs:
-            # aux hs
-            soft_hs = soft_targets['hs'][-1].flatten(0, 1).unsqueeze(1).tile([1, 6, 1]).flatten(1, 2) # [1800, 1536]                      
-            hs = outputs['aux_hs'].flatten(1, 2).transpose([1, 0, 2]).flatten(1, 2) # [1800, 1536]
-            loss_kd_hs = self.loss_kd_hs(hs, soft_hs, weight)                                                     
-            losses.update(dict(loss_kd_hs=loss_kd_hs))
-
-        if self.kd_reference:
-            # aux reference, must be sigmoid
-            soft_reference = soft_targets['reference'][-1].flatten(0, 1).unsqueeze(1).tile([1, 6, 1]).flatten(1, 2) # [1800, 24]
-            reference = outputs['aux_reference'].flatten(1, 2).transpose([1, 0, 2]).flatten(1, 2) # [1800, 24]
-            loss_kd_reference = self.loss_kd_reference(reference, soft_reference, weight)
-            losses.update(dict(loss_kd_reference=loss_kd_reference))
-
-        if self.kd_enc:
-            num_queries = 900
-            topk_weights, topk_ind = paddle.topk(F.sigmoid(soft_targets['enc_class']).max(-1), k=num_queries, axis=1)
-            topk_weights = topk_weights.flatten() # [1800]
-            bs, _, _ = soft_targets['enc_class'].shape
-            batch_ind = paddle.arange(end=bs, dtype=topk_ind.dtype)
-            batch_ind = batch_ind.unsqueeze(-1).tile([1, num_queries])
-            topk_ind = paddle.stack([batch_ind, topk_ind], axis=-1)
-
-            # extract region proposal boxes
-            enc_ref = paddle.gather_nd(outputs['enc_coord'], topk_ind) # [2, 10458, 4]->[2, 900, 4]
-            enc_cls = paddle.gather_nd(outputs['enc_class'], topk_ind) # [2, 900, 80]
-            enc_memory = paddle.gather_nd(outputs['enc_memory'], topk_ind) # [2, 900, 256]
-
-            soft_enc_ref = paddle.gather_nd(soft_targets['enc_coord'], topk_ind) # [2, 10458, 4]->[2, 900, 4]
-            soft_enc_cls = paddle.gather_nd(soft_targets['enc_class'], topk_ind) # [2, 900, 80]
-            soft_enc_memory = paddle.gather_nd(soft_targets['enc_memory'], topk_ind) # [2, 900, 256]
-
-            # weight, topk_ind = paddle.topk(enc_outputs_class_unselected.max(-1)[0], 900, axis=1)
-            loss_kd_enc_cls = self.loss_kd_enc_cls(
-                enc_cls, soft_enc_cls, topk_weights)
-            loss_kd_enc_box = self.loss_kd_enc_box(
-                F.sigmoid(enc_ref), F.sigmoid(soft_enc_ref), topk_weights)
-            loss_kd_enc_memory = self.loss_kd_enc_memory(
-                enc_memory.flatten(0, 1), soft_enc_memory.flatten(0, 1), topk_weights)
-            losses.update(dict(loss_kd_enc_cls=loss_kd_enc_cls,
-                               loss_kd_enc_bbox=loss_kd_enc_box['loss_bbox'],
-                               loss_kd_enc_giou=loss_kd_enc_box['loss_giou'],
-                               loss_kd_enc_memory=loss_kd_enc_memory))
-        return losses
-        # kd_losses = sum(losses[k] * self.weight_dict[k] for k in losses.keys() if k in self.weight_dict)
-        # return kd_losses
-
-    def loss_kl_div(self, pred, soft_label, weight=None):
-        assert pred.shape == soft_label.shape
-        if len(pred.shape) == 3: # [2, 900, 80] [bs, query_num, dim]
-            pred = pred.flatten(0, 1) # [1800, 80]
-            soft_label = soft_label.flatten(0, 1)
-        target = F.softmax(soft_label / self.T, axis=1)
-        target = target.detach()
-        kd_loss = F.kl_div(F.log_softmax(pred / self.T, axis=1), target, reduction='none').mean(1) * self.T * self.T 
-        if weight is not None:
-            kd_loss = sum(kd_loss * weight)
-        else:
-            kd_loss = kd_loss.mean()
-        return kd_loss
-
-    def loss_mse(self, pred, soft_label, weight=None):
-        assert pred.shape == soft_label.shape
-        soft_label = soft_label.detach()
-        if weight is None:                                                                                                   
-            return F.mse_loss(pred, soft_label, size_average=False)                                                          
-        else:                                                                                                                
-            losses = F.mse_loss(pred, soft_label, reduction='none')                                                          
-            losses = losses.mean(1)                                                                                          
-            return (losses * weight).sum()   
-
-    def loss_boxes(self, pred, soft_label, weight=None):
-        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
-           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
-           The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
-        """
-        losses = {}
-        if len(pred.shape) == 3:
-            pred = pred.flatten(0, 1)
-            soft_label = soft_label.flatten(0, 1)
-        loss_bbox = F.l1_loss(pred, soft_label, reduction='none').mean(1)
-        losses['loss_bbox'] = sum(loss_bbox * weight) / weight.sum()
-
-        loss_giou = self.giou_loss(bbox_cxcywh_to_xyxy(pred), bbox_cxcywh_to_xyxy(soft_label)).squeeze(-1)
-        # loss_giou = 1 - bbox_iou(
-        #     bbox_cxcywh_to_xyxy(pred.split(4, -1)),
-        #     bbox_cxcywh_to_xyxy(soft_label.split(4, -1)), giou=True)
-        losses['loss_giou'] = sum(loss_giou * weight) / weight.sum()
-        return losses

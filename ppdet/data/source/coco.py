@@ -106,7 +106,7 @@ class COCODataSet(DetDataset):
             int(num * self.empty_ratio / (1 - self.empty_ratio)), len(records))
         records = random.sample(records, sample_num)
         return records
-    
+
     def _get_proposal(self, img_id, gt_num):
         # load proposals
         proposal_bboxes, proposal_classes, proposal_scores = [], [], []

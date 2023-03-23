@@ -23,14 +23,13 @@ from ppdet.core.workspace import register
 from .iou_loss import GIoULoss
 from ..transformers import bbox_cxcywh_to_xyxy, sigmoid_focal_loss, varifocal_loss_with_logits
 from ..bbox_utils import bbox_iou
-#from IPython import embed
 
 __all__ = ['DETRLoss', 'DINOLoss']
 
 
 @register
 class DETRLoss(nn.Layer):
-    __shared__ = ['num_classes', 'use_focal_loss', 'for_distill']
+    __shared__ = ['num_classes', 'use_focal_loss']
     __inject__ = ['matcher']
 
     def __init__(self,
@@ -48,8 +47,7 @@ class DETRLoss(nn.Layer):
                  use_focal_loss=False,
                  use_vfl=False,
                  use_same_match=False,
-                 same_match_ind=0,
-                 for_distill=False):
+                 same_match_ind=0):
         r"""
         Args:
             num_classes (int): The number of classes.
@@ -69,10 +67,6 @@ class DETRLoss(nn.Layer):
         self.use_vfl = use_vfl
         self.use_same_match = use_same_match
         self.same_match_ind = same_match_ind
-
-        self.for_distill = for_distill
-        if self.for_distill:
-            self.distill_pairs = {}
 
         if not self.use_focal_loss:
             self.loss_coeff['class'] = paddle.full([num_classes + 1],
@@ -102,6 +96,7 @@ class DETRLoss(nn.Layer):
             target_label = paddle.scatter(
                 target_label.reshape([-1, 1]), index, updates.astype('int64'))
             target_label = target_label.reshape([bs, num_query_objects])
+
         if gt_score is not None:
             loss_weight = paddle.ones(logits.shape[:2]) * 0.5
             if num_gt > 0:
@@ -123,18 +118,29 @@ class DETRLoss(nn.Layer):
                 target_score = target_score.reshape(
                     [bs, num_query_objects, 1]) * target_label
                 loss_ = self.loss_coeff['class'] * varifocal_loss_with_logits(
-                    logits, target_score, target_label,
-                    num_gts / num_query_objects)
+                    logits,
+                    target_score,
+                    target_label,
+                    num_gts / num_query_objects,
+                    loss_weight=loss_weight)
             else:
                 loss_ = self.loss_coeff['class'] * sigmoid_focal_loss(
-                    logits, target_label, num_gts / num_query_objects)
+                    logits,
+                    target_label,
+                    num_gts / num_query_objects,
+                    loss_weight=loss_weight)
         else:
             loss_ = F.cross_entropy(
                 logits, target_label, weight=self.loss_coeff['class'])
         return {name_class: loss_}
 
-    def _get_loss_bbox(self, boxes, gt_bbox, match_indices, num_gts,
-                       postfix="", gt_score=None):
+    def _get_loss_bbox(self,
+                       boxes,
+                       gt_bbox,
+                       match_indices,
+                       num_gts,
+                       postfix="",
+                       gt_score=None):
         # boxes: [b, query, 4], gt_bbox: list[[n, 4]]
         name_bbox = "loss_bbox" + postfix
         name_giou = "loss_giou" + postfix
@@ -294,29 +300,6 @@ class DETRLoss(nn.Layer):
         ])
         return src_assign, target_assign
 
-    def _get_src_target_assign_all(self, logit, src, label, target, match_indices):
-        logit_assign = paddle.concat([
-            paddle.gather(
-                t, I, axis=0) if len(I) > 0 else paddle.zeros([0, t.shape[-1]])
-            for t, (I, _) in zip(logit, match_indices)
-        ])
-        src_assign = paddle.concat([
-            paddle.gather(
-                t, I, axis=0) if len(I) > 0 else paddle.zeros([0, t.shape[-1]])
-            for t, (I, _) in zip(src, match_indices)
-        ])
-        label_assign = paddle.concat([
-            paddle.gather(
-                t, J, axis=0) if len(J) > 0 else paddle.zeros([0, t.shape[-1]])
-            for t, (_, J) in zip(label, match_indices)
-        ])
-        target_assign = paddle.concat([
-            paddle.gather(
-                t, J, axis=0) if len(J) > 0 else paddle.zeros([0, t.shape[-1]])
-            for t, (_, J) in zip(target, match_indices)
-        ])
-        return logit_assign, src_assign, label_assign, target_assign
-
     def forward(self,
                 boxes,
                 logits,
@@ -352,19 +335,6 @@ class DETRLoss(nn.Layer):
             num_gts /= paddle.distributed.get_world_size()
         num_gts = paddle.clip(num_gts, min=1.) * kwargs.get("dn_num_group", 1.)
 
-        if self.for_distill and postfix == '':
-            if sum(len(a) for a in gt_bbox) > 0:
-                src_logit, src_bbox, target_cls, target_bbox = self._get_src_target_assign_all(
-                    logits[-1].detach(), boxes[-1].detach(), gt_class, gt_bbox, match_indices)
-                iou_score = bbox_iou(
-                    bbox_cxcywh_to_xyxy(src_bbox).split(4, -1),
-                    bbox_cxcywh_to_xyxy(target_bbox).split(4, -1))
-            else:
-                iou_score = None
-            self.distill_pairs['match_indices' + postfix] = match_indices
-            self.distill_pairs['src_logit' + postfix] = src_logit
-            self.distill_pairs['iou_score' + postfix] = iou_score
-
         total_loss = dict()
         if boxes is not None and self.use_vfl:
             if sum(len(a) for a in gt_bbox) > 0:
@@ -378,24 +348,47 @@ class DETRLoss(nn.Layer):
         else:
             iou_score = None
         total_loss.update(
-            self._get_loss_class(logits[
-                -1] if logits is not None else None, gt_class, match_indices,
-                                 self.num_classes, num_gts, postfix, iou_score, gt_score))
+            self._get_loss_class(
+                logits[-1] if logits is not None else None,
+                gt_class,
+                match_indices,
+                self.num_classes,
+                num_gts,
+                postfix,
+                iou_score,
+                gt_score=gt_score))
         total_loss.update(
-            self._get_loss_bbox(boxes[-1] if boxes is not None else None,
-                                gt_bbox, match_indices, num_gts, postfix, gt_score))
+            self._get_loss_bbox(
+                boxes[-1] if boxes is not None else None,
+                gt_bbox,
+                match_indices,
+                num_gts,
+                postfix,
+                gt_score=gt_score))
+
         # TODO: not support gt_score
         if masks is not None and gt_mask is not None:
             total_loss.update(
-                self._get_loss_mask(masks if masks is not None else None,
-                                    gt_mask, match_indices, num_gts, postfix))
+                self._get_loss_mask(
+                    masks if masks is not None else None,
+                    gt_mask,
+                    match_indices,
+                    num_gts,
+                    postfix,
+                    gt_score=gt_score))
 
         if self.aux_loss:
             total_loss.update(
                 self._get_loss_aux(
-                    boxes[:-1] if boxes is not None else None, logits[:-1]
-                    if logits is not None else None, gt_bbox, gt_class,
-                    self.num_classes, num_gts, dn_match_indices, postfix, gt_score))
+                    boxes[:-1] if boxes is not None else None,
+                    logits[:-1] if logits is not None else None,
+                    gt_bbox,
+                    gt_class,
+                    self.num_classes,
+                    num_gts,
+                    dn_match_indices,
+                    postfix,
+                    gt_score=gt_score))
 
         return total_loss
 
@@ -426,7 +419,6 @@ class DINOLoss(DETRLoss):
             use_pos_only = self.matcher.use_pos_only
             self.use_same_match = self.use_vfl = False
             self.matcher.use_pos_only = False
-            num_proposal = len(proposal_bbox[0])
             for i in range(len(proposal_bbox[0])):
                 extra_loss = super(DINOLoss, self).forward(
                     boxes,
@@ -442,9 +434,6 @@ class DINOLoss(DETRLoss):
                         for proposal_score_per_img in proposal_score
                     ],
                     postfix=f'_proposal_{i}')
-                # noramlize proposal loss
-                #for key, value in extra_loss.items():
-                #    extra_loss[key] = value / num_proposal
                 total_loss.update(extra_loss)
 
             self.use_same_match = use_same_match

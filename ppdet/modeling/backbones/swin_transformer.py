@@ -191,6 +191,8 @@ class WindowAttention(nn.Layer):
         relative_coords[:, :, 1] += self.window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
         self.relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
+        self.register_buffer("relative_position_index",
+                             self.relative_position_index)
 
         self.qkv = nn.Linear(dim, dim * 3, bias_attr=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -423,6 +425,7 @@ class BasicLayer(nn.Layer):
     """ A basic Swin Transformer layer for one stage.
     Args:
         dim (int): Number of input channels.
+        input_resolution (tuple[int]): Input resolution.
         depth (int): Number of blocks.
         num_heads (int): Number of attention heads.
         window_size (int): Local window size.
@@ -497,7 +500,10 @@ class BasicLayer(nn.Layer):
         cnt = 0
         for h in h_slices:
             for w in w_slices:
-                img_mask[:, h, w, :] = cnt
+                try:
+                    img_mask[:, h, w, :] = cnt
+                except:
+                    pass
 
                 cnt += 1
 
@@ -566,12 +572,15 @@ class PatchEmbed(nn.Layer):
 @register
 @serializable
 class SwinTransformer(nn.Layer):
-    """ Swin Transformer backbone
+    """ Swin Transformer
+        A PaddlePaddle impl of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows`  -
+          https://arxiv.org/pdf/2103.14030
+
     Args:
-        arch (str): Architecture of FocalNet
-        pretrain_img_size (int | tuple(int)): Input image size. Default 224
+        img_size (int | tuple(int)): Input image size. Default 224
         patch_size (int | tuple(int)): Patch size. Default: 4
         in_chans (int): Number of input image channels. Default: 3
+        num_classes (int): Number of classes for classification head. Default: 1000
         embed_dim (int): Patch embedding dimension. Default: 96
         depths (tuple(int)): Depth of each Swin Transformer layer.
         num_heads (tuple(int)): Number of attention heads in different layers.
@@ -610,7 +619,6 @@ class SwinTransformer(nn.Layer):
                  pretrained=None):
         super(SwinTransformer, self).__init__()
         assert arch in MODEL_cfg.keys(), "Unsupported arch: {}".format(arch)
-
         pretrain_img_size = MODEL_cfg[arch]['pretrain_img_size']
         embed_dim = MODEL_cfg[arch]['embed_dim']
         depths = MODEL_cfg[arch]['depths']
@@ -740,7 +748,7 @@ class SwinTransformer(nn.Layer):
                     (0, 3, 1, 2))
                 outs.append(out)
 
-        return outs
+        return tuple(outs)
 
     @property
     def out_shape(self):

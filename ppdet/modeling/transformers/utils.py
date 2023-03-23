@@ -51,7 +51,12 @@ def bbox_xyxy_to_cxcywh(x):
         [(x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1), (y2 - y1)], axis=-1)
 
 
-def sigmoid_focal_loss(logit, label, normalizer=1.0, alpha=0.25, gamma=2.0, loss_weight=None):
+def sigmoid_focal_loss(logit,
+                       label,
+                       normalizer=1.0,
+                       alpha=0.25,
+                       gamma=2.0,
+                       loss_weight=None):
     prob = F.sigmoid(logit)
     ce_loss = F.binary_cross_entropy_with_logits(logit, label, reduction="none")
     p_t = prob * label + (1 - prob) * (1 - label)
@@ -239,7 +244,7 @@ def get_sine_pos_embed(pos_tensor,
     """generate sine position embedding from a position tensor
 
     Args:
-        pos_tensor (Tensor): Shape as `(None, n)`.
+        pos_tensor (torch.Tensor): Shape as `(None, n)`.
         num_pos_feats (int): projected shape for each float in the tensor. Default: 128
         temperature (int): The temperature used for scaling
             the position embedding. Default: 10000.
@@ -248,7 +253,7 @@ def get_sine_pos_embed(pos_tensor,
             be `[pos(y), pos(x)]`. Defaults: True.
 
     Returns:
-        Tensor: Returned position embedding  # noqa
+        torch.Tensor: Returned position embedding  # noqa
         with shape `(None, n * num_pos_feats)`.
     """
     scale = 2. * math.pi

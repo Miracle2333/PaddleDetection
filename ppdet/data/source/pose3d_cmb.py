@@ -11,7 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
 # See the License for the specific language governing permissions and   
 # limitations under the License.
-
+"""
+this code is base on https://github.com/open-mmlab/mmpose
+"""
 import os
 import cv2
 import numpy as np
@@ -78,7 +80,7 @@ class Pose3DDataset(DetDataset):
             mjm_mask[indices, :] = 0.0
         # return mjm_mask
 
-        num_joints = 10
+        num_joints = 1
         mvm_mask = np.ones((num_joints, 1)).astype(np.float)
         if self.test_mode == False:
             num_vertices = num_joints
