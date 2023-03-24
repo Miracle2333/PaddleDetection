@@ -1,5 +1,5 @@
 _BASE_: [
-  '../../datasets/coco_detection.yml',
+  '../../datasets/coco_detection_with_proposal.yml',
   '../../runtime.yml',
   '../_base_/optimizer_12e.yml',
   '../_base_/dino_r50vd_pan.yml',
