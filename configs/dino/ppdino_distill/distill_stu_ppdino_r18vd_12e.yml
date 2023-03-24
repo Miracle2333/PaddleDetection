@@ -1,5 +1,5 @@
 _BASE_: [
-  '../../datasets/coco_detection_with_proposal.yml',
+  '../../datasets/coco_detection.yml',
   '../../runtime.yml',
   '../_base_/optimizer_12e.yml',
   '../_base_/dino_r50vd_pan.yml',
@@ -8,8 +8,9 @@ _BASE_: [
 
 weights: output/dino_r18vd_pan_3_0_6_1x_coco/model_final
 find_unused_parameters: True
-log_iter: 100
+log_iter: 350
 snapshot_epoch: 1
+save_dir: ./output/teach_kd_5
 
 
 pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet18_vd_pretrained.pdparams

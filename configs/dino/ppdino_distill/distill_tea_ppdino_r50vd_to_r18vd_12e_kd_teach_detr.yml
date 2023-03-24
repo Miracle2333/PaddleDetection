@@ -70,8 +70,9 @@ DETRBBoxPostProcess:
 
 
 pretrain_weights: https://bj.bcebos.com/v1/paddledet/models/legacy_model/dino_r50vd_pan_3_0_6_5x_coco_525.pdparams
-log_iter: 20
+log_iter: 350
 snapshot_epoch: 1
+save_dir: ./output/teach_kd_5
 
 for_distill: True
 
