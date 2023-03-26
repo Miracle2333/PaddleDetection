@@ -103,13 +103,20 @@ class DETRLoss(nn.Layer):
             if iou_score is not None and self.use_vfl:
                 if gt_score is not None:
                     target_score = paddle.zeros([bs, num_query_objects])
-                    if num_gt > 0:
-                        target_score = paddle.scatter(
-                            target_score.reshape([-1, 1]), index, gt_score)
+                    target_score = paddle.scatter(
+                        target_score.reshape([-1, 1]), index, gt_score)
                     target_score = target_score.reshape(
                         [bs, num_query_objects, 1]) * target_label
-                    loss_ = self.loss_coeff['class'] * sigmoid_focal_loss(
-                        logits, target_score , num_gts / num_query_objects)
+                    
+                    target_score_iou = paddle.zeros([bs, num_query_objects])
+                    target_score_iou = paddle.scatter(
+                        target_score_iou.reshape([-1, 1]), index, iou_score)
+                    target_score_iou = target_score_iou.reshape(
+                        [bs, num_query_objects, 1]) * target_label
+                    target_score=paddle.multiply(target_score,target_score_iou)
+                    loss_ = self.loss_coeff['class'] * varifocal_loss_with_logits(
+                        logits, target_score, target_label,
+                        num_gts / num_query_objects)                    
                 else:
                     target_score = paddle.zeros([bs, num_query_objects])
                     if num_gt > 0:

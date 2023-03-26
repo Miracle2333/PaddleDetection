@@ -155,7 +155,7 @@ DETR_SSOD:
   student: DETR
   train_cfg:
     sup_weight: 1.0
-    unsup_weight: 2.0
+    unsup_weight: 1.0
     semi_start_iters: -1
     ema_start_iters:  -1
     #debug
