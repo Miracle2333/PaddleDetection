@@ -51,7 +51,7 @@ def bbox_xyxy_to_cxcywh(x):
         [(x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1), (y2 - y1)], axis=-1)
 
 
-def sigmoid_focal_loss(logit, label, normalizer=1.0, alpha=0.25, gamma=2.0):
+def sigmoid_focal_loss(logit, label, normalizer=1.0, alpha=0.25, gamma=2.0, loss_weight=None):
     prob = F.sigmoid(logit)
     ce_loss = F.binary_cross_entropy_with_logits(logit, label, reduction="none")
     p_t = prob * label + (1 - prob) * (1 - label)
@@ -60,6 +60,9 @@ def sigmoid_focal_loss(logit, label, normalizer=1.0, alpha=0.25, gamma=2.0):
     if alpha >= 0:
         alpha_t = alpha * label + (1 - alpha) * (1 - label)
         loss = alpha_t * loss
+
+    if loss_weight is not None:
+        loss = loss * loss_weight
     return loss.mean(1).sum() / normalizer
 
 
@@ -78,6 +81,7 @@ def deformable_attention_core_func(value, value_spatial_shapes,
         value_level_start_index (Tensor): [n_levels]
         sampling_locations (Tensor): [bs, query_length, n_head, n_levels, n_points, 2]
         attention_weights (Tensor): [bs, query_length, n_head, n_levels, n_points]
+
     Returns:
         output (Tensor): [bs, Length_{query}, C]
     """
@@ -128,7 +132,7 @@ def get_contrastive_denoising_training_group(targets,
                                              num_denoising=100,
                                              label_noise_ratio=0.5,
                                              box_noise_scale=1.0):
-    if num_denoising <= 0 or targets==None:
+    if num_denoising <= 0:
         return None, None, None, None
     num_gts = [len(t) for t in targets["gt_class"]]
     max_gt_num = max(num_gts)
@@ -233,16 +237,18 @@ def get_sine_pos_embed(pos_tensor,
                        temperature=10000,
                        exchange_xy=True):
     """generate sine position embedding from a position tensor
+
     Args:
-        pos_tensor (torch.Tensor): Shape as `(None, n)`.
+        pos_tensor (Tensor): Shape as `(None, n)`.
         num_pos_feats (int): projected shape for each float in the tensor. Default: 128
         temperature (int): The temperature used for scaling
             the position embedding. Default: 10000.
         exchange_xy (bool, optional): exchange pos x and pos y. \
             For example, input tensor is `[x, y]`, the results will  # noqa
             be `[pos(y), pos(x)]`. Defaults: True.
+
     Returns:
-        torch.Tensor: Returned position embedding  # noqa
+        Tensor: Returned position embedding  # noqa
         with shape `(None, n * num_pos_feats)`.
     """
     scale = 2. * math.pi
@@ -267,10 +273,12 @@ def varifocal_loss_with_logits(pred_logits,
                                label,
                                normalizer=1.0,
                                alpha=0.75,
-                               gamma=2.0):
+                               gamma=2.0,
+                               loss_weight=None):
     pred_score = F.sigmoid(pred_logits)
     weight = alpha * pred_score.pow(gamma) * (1 - label) + gt_score * label
     loss = F.binary_cross_entropy_with_logits(
         pred_logits, gt_score, weight=weight, reduction='none')
+    if loss_weight is not None:
+        loss = loss * loss_weight
     return loss.mean(1).sum() / normalizer
-

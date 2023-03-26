@@ -64,3 +64,5 @@ class MultiSteamDetector(BaseArch):
             else:
                 raise Exception("{} is not found in student model".format(key))
         self.teacher.set_dict(new_dict)
+
+    

@@ -159,15 +159,14 @@ class BatchRandomResize(BaseOperator):
             target_size = self.target_size[index]
         else:
             target_size = self.target_size
-        if context is not None:
-            target_size=self.target_size[context]
+
         if self.random_interp:
             interp = np.random.choice(self.interps)
         else:
             interp = self.interp
 
         resizer = Resize(target_size, keep_ratio=self.keep_ratio, interp=interp)
-        return [resizer(samples, context=context),index]
+        return resizer(samples, context=context)
 
 
 @register_op
@@ -1121,10 +1120,7 @@ class PadGT(BaseOperator):
             padding_mode = 'constant') -> np.ndarray:
         """Pad the given image to a certain shape or pad on all sides with
         specified padding mode and padding value.
-<<<<<<< HEAD
-=======
 
->>>>>>> exp_merge_base_dino
         Args:
             img (ndarray): Image to be padded.
             shape (tuple[int]): Expected padding shape (h, w). Default: None.
@@ -1150,10 +1146,7 @@ class PadGT(BaseOperator):
                 on the edge. For example, padding [1, 2, 3, 4] with 2 elements on
                 both sides in symmetric mode will result in
                 [2, 1, 1, 2, 3, 4, 4, 3]
-<<<<<<< HEAD
-=======
 
->>>>>>> exp_merge_base_dino
         Returns:
             ndarray: The padded image.
         """

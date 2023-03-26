@@ -1,0 +1,53 @@
+_BASE_: [
+  '../datasets/visdrone_detection.yml',
+  '../runtime.yml',
+  '_base_/optimizer_3x.yml',
+  '_base_/dino_r50vd_pan.yml',
+  '_base_/yoloe_reader.yml',
+]
+
+save_dir: ./output/visdrone_10
+
+TrainDataset:
+  !COCODataSet
+    image_dir: VisDrone2019-DET-train/
+    anno_path: semi_annotations/train.1@10.json
+    dataset_dir: dataset/visdrone
+    data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
+
+EvalDataset:
+  !COCODataSet
+    image_dir: VisDrone2019-DET-val/
+    anno_path: val.json
+    dataset_dir: dataset/visdrone
+    allow_empty: true
+
+TestDataset:
+  !ImageFolder
+    anno_path: val.json
+    dataset_dir: dataset/visdrone
+
+
+weights: output/dino_r50vd_pan_4_0_6_3x_coco/model_final
+find_unused_parameters: True
+log_iter: 81
+snapshot_epoch: 10
+
+epoch: 300
+LearningRate:
+  base_lr: 0.0002
+  schedulers:
+  - !PiecewiseDecay
+    gamma: 1.0
+    milestones: [100]
+    use_warmup: true
+  - !LinearWarmup
+    start_factor: 0.001
+    steps: 2000
+
+OptimizerBuilder:
+  clip_grad_by_norm: 0.1
+  regularizer: false
+  optimizer:
+    type: AdamW
+    weight_decay: 0.0001

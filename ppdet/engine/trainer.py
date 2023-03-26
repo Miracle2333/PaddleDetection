@@ -47,14 +47,12 @@ from ppdet.utils.fuse_utils import fuse_conv_bn
 from ppdet.utils import profiler
 from ppdet.modeling.post_process import multiclass_nms
 
-from .callbacks import Callback, ComposeCallback, LogPrinter, Checkpointer, WiferFaceEval, VisualDLWriter, SniperProposalsGenerator, WandbCallback, SemiCheckpointer, SemiLogPrinter
-from .export_utils import _dump_infer_config, _prune_input_spec
+from .callbacks import Callback, ComposeCallback, LogPrinter, Checkpointer, WiferFaceEval, VisualDLWriter, SniperProposalsGenerator, WandbCallback
+from .export_utils import _dump_infer_config, _prune_input_spec, apply_to_static
 
 from paddle.distributed.fleet.utils.hybrid_parallel_util import fused_allreduce_gradients
 
 from ppdet.utils.logger import setup_logger
-
-from ppdet.engine.labelmatch_callbacks import LabelMatchCallback
 logger = setup_logger('ppdet.engine')
 
 __all__ = ['Trainer']
@@ -217,12 +215,7 @@ class Trainer(object):
 
     def _init_callbacks(self):
         if self.mode == 'train':
-            if self.cfg.get('label_match', False):
-                self._callbacks.append(LabelMatchCallback(self))
-            if self.cfg.get('ssod_method', False):
-                self._callbacks = [SemiLogPrinter(self), SemiCheckpointer(self)]
-            else:
-                self._callbacks = [LogPrinter(self), Checkpointer(self)]
+            self._callbacks = [LogPrinter(self), Checkpointer(self)]
             if self.cfg.get('use_vdl', False):
                 self._callbacks.append(VisualDLWriter(self))
             if self.cfg.get('save_proposals', False):
@@ -416,15 +409,6 @@ class Trainer(object):
         else:
             load_weight(self.model.reid, reid_weights)
 
-    def load_semi_weights(self, t_weights, s_weights):
-        if self.is_loaded_weights:
-            return 
-        self.start_epoch = 0
-        load_pretrain_weight(self.model.teacher, t_weights)
-        load_pretrain_weight(self.model.student, s_weights)
-        logger.info("Load teacher weights {} to start training".format(t_weights))
-        logger.info("Load student weights {} to start training".format(s_weights))
-        
     def resume_weights(self, weights):
         # support Distill resume weights
         if hasattr(self.model, 'student_model'):

@@ -1,0 +1,51 @@
+_BASE_: [
+  '../datasets/visdrone_detection.yml',
+  '../runtime.yml',
+  '_base_/optimizer_3x.yml',
+  '_base_/dino_r50vd_pan.yml',
+  '_base_/yoloe_reader.yml',
+]
+
+TrainDataset:
+  !COCODataSet
+    image_dir: train/
+    anno_path: annotations/instance_train.json
+    dataset_dir: dataset/SSLAD-2D/labeled
+    data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
+
+EvalDataset:
+  !COCODataSet
+    image_dir: val/
+    anno_path: annotations/instance_val.json
+    dataset_dir: dataset/SSLAD-2D/labeled
+    allow_empty: true
+
+TestDataset:
+  !ImageFolder
+    anno_path: val.json
+    dataset_dir: SSLAD-2D/labeled/test
+
+
+weights: output/dino_r50vd_pan_4_0_6_3x_coco/model_final
+find_unused_parameters: True
+log_iter: 81
+snapshot_epoch: 10
+
+epoch: 300
+LearningRate:
+  base_lr: 0.0001
+  schedulers:
+  - !PiecewiseDecay
+    gamma: 1.0
+    milestones: [100]
+    use_warmup: true
+  - !LinearWarmup
+    start_factor: 0.001
+    steps: 2000
+
+OptimizerBuilder:
+  clip_grad_by_norm: 0.1
+  regularizer: false
+  optimizer:
+    type: AdamW
+    weight_decay: 0.0001

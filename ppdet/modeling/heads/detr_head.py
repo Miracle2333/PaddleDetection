@@ -54,6 +54,7 @@ class MLP(nn.Layer):
 class MultiHeadAttentionMap(nn.Layer):
     """This code is based on
         https://github.com/facebookresearch/detr/blob/main/models/segmentation.py
+
         This is a 2D attention module, which only returns the attention softmax (no multiplication by value)
     """
 
@@ -103,6 +104,7 @@ class MultiHeadAttentionMap(nn.Layer):
 class MaskHeadFPNConv(nn.Layer):
     """This code is based on
         https://github.com/facebookresearch/detr/blob/main/models/segmentation.py
+
         Simple convolutional head, using group norm.
         Upsampling is done using a FPN approach
     """
@@ -355,9 +357,29 @@ class DeformableDETRHead(nn.Layer):
         if self.training:
             assert inputs is not None
             assert 'gt_bbox' in inputs and 'gt_class' in inputs
-
-            return self.loss(outputs_bbox, outputs_logit, inputs['gt_bbox'],
-                             inputs['gt_class'])
+            total_loss = self.loss(outputs_bbox, outputs_logit,
+                                   inputs['gt_bbox'], inputs['gt_class'])
+            if inputs.get('proposal_bbox', None) is not None:
+                proposal_bbox, proposal_class, proposal_score = inputs[
+                    'proposal_bbox'], inputs['proposal_class'], inputs[
+                        'proposal_score']
+                for i in range(len(proposal_bbox[0])):
+                    extra_loss = self.loss(
+                        outputs_bbox,
+                        outputs_logit, [
+                            proposal_bbox_per_img[i]
+                            for proposal_bbox_per_img in proposal_bbox
+                        ], [
+                            proposal_class_per_img[i]
+                            for proposal_class_per_img in proposal_class
+                        ],
+                        gt_score=[
+                            proposal_score_per_img[i]
+                            for proposal_score_per_img in proposal_score
+                        ],
+                        postfix=f'_proposal_{i}')
+                    total_loss.update(extra_loss)
+            return total_loss
         else:
             return (outputs_bbox[-1], outputs_logit[-1], None)
 
@@ -379,10 +401,67 @@ class DINOHead(nn.Layer):
             assert 'gt_bbox' in inputs and 'gt_class' in inputs
 
             if dn_meta is not None:
-                dn_out_bboxes, dec_out_bboxes = paddle.split(
-                    dec_out_bboxes, dn_meta['dn_num_split'], axis=2)
-                dn_out_logits, dec_out_logits = paddle.split(
-                    dec_out_logits, dn_meta['dn_num_split'], axis=2)
+                if isinstance(dn_meta, list):
+                    dual_groups = len(dn_meta) - 1
+                    dec_out_bboxes = paddle.split(
+                        dec_out_bboxes, dual_groups + 1, axis=2)
+                    dec_out_logits = paddle.split(
+                        dec_out_logits, dual_groups + 1, axis=2)
+                    enc_topk_bboxes = paddle.split(
+                        enc_topk_bboxes, dual_groups + 1, axis=1)
+                    enc_topk_logits = paddle.split(
+                        enc_topk_logits, dual_groups + 1, axis=1)
+
+                    dec_out_bboxes_list = []
+                    dec_out_logits_list = []
+                    dn_out_bboxes_list = []
+                    dn_out_logits_list = []
+                    loss = {}
+                    for g_id in range(dual_groups + 1):
+                        if dn_meta[g_id] is not None:
+                            dn_out_bboxes_gid, dec_out_bboxes_gid = paddle.split(
+                                dec_out_bboxes[g_id],
+                                dn_meta[g_id]['dn_num_split'],
+                                axis=2)
+                            dn_out_logits_gid, dec_out_logits_gid = paddle.split(
+                                dec_out_logits[g_id],
+                                dn_meta[g_id]['dn_num_split'],
+                                axis=2)
+                        else:
+                            dn_out_bboxes_gid, dn_out_logits_gid = None, None
+                            dec_out_bboxes_gid = dec_out_bboxes[g_id]
+                            dec_out_logits_gid = dec_out_logits[g_id]
+                        out_bboxes_gid = paddle.concat([
+                            enc_topk_bboxes[g_id].unsqueeze(0),
+                            dec_out_bboxes_gid
+                        ])
+                        out_logits_gid = paddle.concat([
+                            enc_topk_logits[g_id].unsqueeze(0),
+                            dec_out_logits_gid
+                        ])
+                        loss_gid = self.loss(
+                            out_bboxes_gid,
+                            out_logits_gid,
+                            inputs['gt_bbox'],
+                            inputs['gt_class'],
+                            dn_out_bboxes=dn_out_bboxes_gid,
+                            dn_out_logits=dn_out_logits_gid,
+                            dn_meta=dn_meta[g_id])
+                        # sum loss
+                        for key, value in loss_gid.items():
+                            loss.update({
+                                key: loss.get(key, paddle.zeros([1])) + value
+                            })
+
+                    # average across (dual_groups + 1)
+                    for key, value in loss.items():
+                        loss.update({key: value / (dual_groups + 1)})
+                    return loss
+                else:
+                    dn_out_bboxes, dec_out_bboxes = paddle.split(
+                        dec_out_bboxes, dn_meta['dn_num_split'], axis=2)
+                    dn_out_logits, dec_out_logits = paddle.split(
+                        dec_out_logits, dn_meta['dn_num_split'], axis=2)
             else:
                 dn_out_bboxes, dn_out_logits = None, None
 
@@ -396,6 +475,9 @@ class DINOHead(nn.Layer):
                 out_logits,
                 inputs['gt_bbox'],
                 inputs['gt_class'],
+                proposal_bbox=inputs.get('proposal_bbox', None),
+                proposal_class=inputs.get('proposal_class', None),
+                proposal_score=inputs.get('proposal_score', None),
                 dn_out_bboxes=dn_out_bboxes,
                 dn_out_logits=dn_out_logits,
                 dn_meta=dn_meta)

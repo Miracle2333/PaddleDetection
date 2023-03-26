@@ -15,6 +15,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+import math
 from typing import KeysView
 import copy
 from ppdet.core.workspace import register, create, merge_config
@@ -48,11 +49,14 @@ class DETR_SSOD(MultiSteamDetector):
             train_cfg=train_cfg,
             test_cfg=test_cfg,
         )
-        self.semi_start_iters=train_cfg['semi_start_iters']
-        self.ema_start_iters=train_cfg['ema_start_iters']
-        self.momentum=0.9996
-        self.cls_thr=None
-        self.cls_thr_ig=None
+        self.semi_start_iters = train_cfg['semi_start_iters']
+        self.ema_start_iters = train_cfg['ema_start_iters']
+        self.momentum = train_cfg['momentum']
+        self.cls_thr = None
+        self.cls_thr_ig = None
+        self.total_step = 0
+        self.cur_step = 0
+        self.total_epoch = train_cfg['epoch']
         # self.id=0
         if train_cfg is not None:
             self.freeze("teacher")
@@ -85,8 +89,6 @@ class DETR_SSOD(MultiSteamDetector):
             iter_id=inputs[-1]
         if iter_id==self.semi_start_iters:
             self.update_ema_model(momentum=0)
-        elif iter_id>self.semi_start_iters:
-            self.update_ema_model(momentum=self.momentum)
         # elif iter_id<self.semi_start_iters:
         #     self.update_ema_model(momentum=0)
         if iter_id>=self.semi_start_iters:
@@ -95,6 +97,11 @@ class DETR_SSOD(MultiSteamDetector):
                 print('******semi start*******')
                 print('***********************')
             data_sup_w, data_sup_s, data_unsup_w, data_unsup_s,_=inputs
+            self.cur_step = iter_id
+            self.total_step =  data_unsup_s['steps_per_epoch'] * self.total_epoch
+            #self.update_consine_monentum() 
+            self.update_ema_model(momentum=self.momentum)
+            
             
             if data_sup_w['image'].shape != data_sup_s['image'].shape:
                 data_sup_w, data_sup_s = align_weak_strong_shape(data_sup_w,data_sup_s)
@@ -281,7 +288,11 @@ class DETR_SSOD(MultiSteamDetector):
             losses = self.student.detr_head(out_transformer, body_feats, student_unsup)
         return losses
 
-
+    def update_consine_monentum(self):
+         # 1 − (1 − τbase) · (cos(πk/K) + 1)/2
+        base_momentum = self.momentum
+        cur_momentum = 1 - (1 - base_momentum) * (math.cos(math.pi * self.cur_step / self.total_step) + 1.0) * 0.5
+        return cur_momentum
 
 
 def box_cxcywh_to_xyxy(x):

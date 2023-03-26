@@ -1,4 +1,4 @@
-# Copyright (c) 2022 PaddlePaddle Authors. All Rights Reserved.
+# Copyright (c) 2023 PaddlePaddle Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,9 +36,9 @@ from ..initializer import (linear_init_, constant_, xavier_uniform_, normal_,
                            bias_init_with_prob)
 from .utils import (_get_clones, get_valid_ratio,
                     get_contrastive_denoising_training_group,
-                    get_sine_pos_embed)
+                    get_sine_pos_embed, inverse_sigmoid)
 
-__all__ = ['DINOTransformer']
+__all__ = ['GroupDINOTransformer']
 
 
 class DINOTransformerEncoderLayer(nn.Layer):
@@ -159,6 +159,8 @@ class DINOTransformerDecoderLayer(nn.Layer):
                  activation="relu",
                  n_levels=4,
                  n_points=4,
+                 dual_queries=False,
+                 dual_groups=0,
                  weight_attr=None,
                  bias_attr=None):
         super(DINOTransformerDecoderLayer, self).__init__()
@@ -192,6 +194,12 @@ class DINOTransformerDecoderLayer(nn.Layer):
             d_model,
             weight_attr=ParamAttr(regularizer=L2Decay(0.0)),
             bias_attr=ParamAttr(regularizer=L2Decay(0.0)))
+
+        # for dual groups 
+        self.dual_queries = dual_queries
+        self.dual_groups = dual_groups
+        self.n_head = n_head
+
         self._reset_parameters()
 
     def _reset_parameters(self):
@@ -217,18 +225,47 @@ class DINOTransformerDecoderLayer(nn.Layer):
                 query_pos_embed=None):
         # self attention
         q = k = self.with_pos_embed(tgt, query_pos_embed)
+        if self.dual_queries:
+            dual_groups = self.dual_groups
+            bs, num_queries, n_model = paddle.shape(q)
+            q = paddle.concat(q.split(dual_groups + 1, axis=1), axis=0)
+            k = paddle.concat(k.split(dual_groups + 1, axis=1), axis=0)
+            tgt = paddle.concat(tgt.split(dual_groups + 1, axis=1), axis=0)
+
+            g_num_queries = num_queries // (dual_groups + 1)
+            if attn_mask is None or attn_mask[0] is None:
+                attn_mask = None
+            else:
+                # [(dual_groups + 1), g_num_queries, g_num_queries]
+                attn_mask = paddle.concat(
+                    [sa_mask.unsqueeze(0) for sa_mask in attn_mask], axis=0)
+                # [1, (dual_groups + 1), 1, g_num_queries, g_num_queries]
+                # --> [bs, (dual_groups + 1), nhead, g_num_queries, g_num_queries]
+                # --> [bs * (dual_groups + 1), nhead, g_num_queries, g_num_queries]
+                attn_mask = attn_mask.unsqueeze(0).unsqueeze(2).tile(
+                    [bs, 1, self.n_head, 1, 1])
+                attn_mask = attn_mask.reshape([
+                    bs * (dual_groups + 1), self.n_head, g_num_queries,
+                    g_num_queries
+                ])
+
         if attn_mask is not None:
             attn_mask = attn_mask.astype('bool')
+
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=attn_mask)
         tgt = tgt + self.dropout1(tgt2)
-        tgt = self.norm1(tgt)
+        tgt = self.norm2(tgt)
+
+        # trace back
+        if self.dual_queries:
+            tgt = paddle.concat(tgt.split(dual_groups + 1, axis=0), axis=1)
 
         # cross attention
         tgt2 = self.cross_attn(
             self.with_pos_embed(tgt, query_pos_embed), reference_points, memory,
             memory_spatial_shapes, memory_level_start_index, memory_mask)
         tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
+        tgt = self.norm1(tgt)
 
         # ffn
         tgt2 = self.forward_ffn(tgt)
@@ -249,6 +286,7 @@ class DINOTransformerDecoder(nn.Layer):
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.return_intermediate = return_intermediate
+
         self.norm = nn.LayerNorm(
             hidden_dim,
             weight_attr=ParamAttr(regularizer=L2Decay(0.0)),
@@ -256,7 +294,7 @@ class DINOTransformerDecoder(nn.Layer):
 
     def forward(self,
                 tgt,
-                ref_points_unact,
+                reference_points,
                 memory,
                 memory_spatial_shapes,
                 memory_level_start_index,
@@ -271,9 +309,9 @@ class DINOTransformerDecoder(nn.Layer):
 
         output = tgt
         intermediate = []
-        inter_ref_bboxes_unact = []
+        inter_ref_bboxes = []
         for i, layer in enumerate(self.layers):
-            reference_points_input = F.sigmoid(ref_points_unact).unsqueeze(
+            reference_points_input = reference_points.unsqueeze(
                 2) * valid_ratios.tile([1, 1, 2]).unsqueeze(1)
             query_pos_embed = get_sine_pos_embed(
                 reference_points_input[..., 0, :], self.hidden_dim // 2)
@@ -282,26 +320,24 @@ class DINOTransformerDecoder(nn.Layer):
             output = layer(output, reference_points_input, memory,
                            memory_spatial_shapes, memory_level_start_index,
                            attn_mask, memory_mask, query_pos_embed)
-
-            inter_ref_bbox_unact = bbox_head[i](output) + ref_points_unact
+            inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
+                reference_points))
 
             if self.return_intermediate:
                 intermediate.append(self.norm(output))
-                inter_ref_bboxes_unact.append(inter_ref_bbox_unact)
+                inter_ref_bboxes.append(inter_ref_bbox)
 
-            ref_points_unact = inter_ref_bbox_unact.detach()
+            reference_points = inter_ref_bbox.detach()
 
         if self.return_intermediate:
-            return paddle.stack(intermediate), paddle.stack(
-                inter_ref_bboxes_unact)
+            return paddle.stack(intermediate), paddle.stack(inter_ref_bboxes)
 
-        return output, ref_points_unact
+        return output, reference_points
 
 
-#from IPython import embed
 @register
-class DINOTransformer(nn.Layer):
-    __shared__ = ['num_classes', 'hidden_dim', 'for_distill']
+class GroupDINOTransformer(nn.Layer):
+    __shared__ = ['num_classes', 'hidden_dim']
 
     def __init__(self,
                  num_classes=80,
@@ -325,9 +361,11 @@ class DINOTransformer(nn.Layer):
                  label_noise_ratio=0.5,
                  box_noise_scale=1.0,
                  learnt_init_query=True,
-                 for_distill=False,
+                 use_input_proj=True,
+                 dual_queries=False,
+                 dual_groups=0,
                  eps=1e-2):
-        super(DINOTransformer, self).__init__()
+        super(GroupDINOTransformer, self).__init__()
         assert position_embed_type in ['sine', 'learned'], \
             f'ValueError: position_embed_type not supported {position_embed_type}!'
         assert len(backbone_feat_channels) <= num_levels
@@ -339,9 +377,11 @@ class DINOTransformer(nn.Layer):
         self.num_queries = num_queries
         self.eps = eps
         self.num_decoder_layers = num_decoder_layers
+        self.use_input_proj = use_input_proj
 
-        # backbone feature projection
-        self._build_input_proj_layer(backbone_feat_channels)
+        if use_input_proj:
+            # backbone feature projection
+            self._build_input_proj_layer(backbone_feat_channels)
 
         # Transformer module
         encoder_layer = DINOTransformerEncoderLayer(
@@ -349,8 +389,15 @@ class DINOTransformer(nn.Layer):
             num_encoder_points)
         self.encoder = DINOTransformerEncoder(encoder_layer, num_encoder_layers)
         decoder_layer = DINOTransformerDecoderLayer(
-            hidden_dim, nhead, dim_feedforward, dropout, activation, num_levels,
-            num_decoder_points)
+            hidden_dim,
+            nhead,
+            dim_feedforward,
+            dropout,
+            activation,
+            num_levels,
+            num_decoder_points,
+            dual_queries=dual_queries,
+            dual_groups=dual_groups)
         self.decoder = DINOTransformerDecoder(hidden_dim, decoder_layer,
                                               num_decoder_layers,
                                               return_intermediate_dec)
@@ -364,6 +411,18 @@ class DINOTransformer(nn.Layer):
         self.label_noise_ratio = label_noise_ratio
         self.box_noise_scale = box_noise_scale
 
+        # for dual group
+        self.dual_queries = dual_queries
+        self.dual_groups = dual_groups
+        if self.dual_queries:
+            self.denoising_class_embed_groups = nn.LayerList([
+                nn.Embedding(
+                    num_classes,
+                    hidden_dim,
+                    weight_attr=ParamAttr(initializer=nn.initializer.Normal()))
+                for _ in range(self.dual_groups)
+            ])
+
         # position embedding
         self.position_embedding = PositionEmbedding(
             hidden_dim // 2,
@@ -376,6 +435,14 @@ class DINOTransformer(nn.Layer):
         self.learnt_init_query = learnt_init_query
         if learnt_init_query:
             self.tgt_embed = nn.Embedding(num_queries, hidden_dim)
+            normal_(self.tgt_embed.weight)
+            if self.dual_queries:
+                self.tgt_embed_dual = nn.LayerList([
+                    nn.Embedding(num_queries, hidden_dim)
+                    for _ in range(self.dual_groups)
+                ])
+                for dual_tgt_module in self.tgt_embed_dual:
+                    normal_(dual_tgt_module.weight)
         self.query_pos_head = MLP(2 * hidden_dim,
                                   hidden_dim,
                                   hidden_dim,
@@ -388,8 +455,24 @@ class DINOTransformer(nn.Layer):
                 hidden_dim,
                 weight_attr=ParamAttr(regularizer=L2Decay(0.0)),
                 bias_attr=ParamAttr(regularizer=L2Decay(0.0))))
+        if self.dual_queries:
+            self.enc_output = _get_clones(self.enc_output, self.dual_groups + 1)
+        else:
+            self.enc_output = _get_clones(self.enc_output, 1)
+
         self.enc_score_head = nn.Linear(hidden_dim, num_classes)
         self.enc_bbox_head = MLP(hidden_dim, hidden_dim, 4, num_layers=3)
+
+        if self.dual_queries:
+            self.enc_bbox_head_dq = nn.LayerList([
+                MLP(hidden_dim, hidden_dim, 4, num_layers=3)
+                for i in range(self.dual_groups)
+            ])
+            self.enc_score_head_dq = nn.LayerList([
+                nn.Linear(hidden_dim, num_classes)
+                for i in range(self.dual_groups)
+            ])
+
         # decoder head
         self.dec_score_head = nn.LayerList([
             nn.Linear(hidden_dim, num_classes)
@@ -399,11 +482,6 @@ class DINOTransformer(nn.Layer):
             MLP(hidden_dim, hidden_dim, 4, num_layers=3)
             for _ in range(num_decoder_layers)
         ])
-
-        # detr distill
-        self.for_distill = for_distill
-        if for_distill:
-            self.distill_pairs = dict()
 
         self._reset_parameters()
 
@@ -420,16 +498,19 @@ class DINOTransformer(nn.Layer):
             constant_(reg_.layers[-1].weight)
             constant_(reg_.layers[-1].bias)
 
-        linear_init_(self.enc_output[0])
-        xavier_uniform_(self.enc_output[0].weight)
+        for enc_output in self.enc_output:
+            linear_init_(enc_output[0])
+            xavier_uniform_(enc_output[0].weight)
         normal_(self.level_embed.weight)
         if self.learnt_init_query:
             xavier_uniform_(self.tgt_embed.weight)
         xavier_uniform_(self.query_pos_head.layers[0].weight)
         xavier_uniform_(self.query_pos_head.layers[1].weight)
-        for l in self.input_proj:
-            xavier_uniform_(l[0].weight)
-            constant_(l[0].bias)
+        normal_(self.denoising_class_embed.weight)
+        if self.use_input_proj:
+            for l in self.input_proj:
+                xavier_uniform_(l[0].weight)
+                constant_(l[0].bias)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -464,19 +545,20 @@ class DINOTransformer(nn.Layer):
             in_channels = self.hidden_dim
 
     def _get_encoder_input(self, feats, pad_mask=None):
-        # get projection features
-        proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
-        if self.num_levels > len(proj_feats):
-            len_srcs = len(proj_feats)
-            for i in range(len_srcs, self.num_levels):
-                if i == len_srcs:
-                    proj_feats.append(self.input_proj[i](feats[-1]))
-                else:
-                    proj_feats.append(self.input_proj[i](proj_feats[-1]))
-
-        if self.for_distill:
-            self.distill_pairs['proj_feats'] = proj_feats
-
+        if self.use_input_proj:
+            # get projection features
+            proj_feats = [
+                self.input_proj[i](feat) for i, feat in enumerate(feats)
+            ]
+            if self.num_levels > len(proj_feats):
+                len_srcs = len(proj_feats)
+                for i in range(len_srcs, self.num_levels):
+                    if i == len_srcs:
+                        proj_feats.append(self.input_proj[i](feats[-1]))
+                    else:
+                        proj_feats.append(self.input_proj[i](proj_feats[-1]))
+        else:
+            proj_feats = feats
         # get encoder inputs
         feat_flatten = []
         mask_flatten = []
@@ -495,7 +577,8 @@ class DINOTransformer(nn.Layer):
             valid_ratios.append(get_valid_ratio(mask))
             # [b, h*w, c]
             pos_embed = self.position_embedding(mask).flatten(1, 2)
-            lvl_pos_embed = pos_embed + self.level_embed.weight[i]
+            lvl_pos_embed = pos_embed + self.level_embed.weight[i].reshape(
+                [1, 1, -1])
             lvl_pos_embed_flatten.append(lvl_pos_embed)
             if pad_mask is not None:
                 # [b, h*w]
@@ -522,31 +605,18 @@ class DINOTransformer(nn.Layer):
                 lvl_pos_embed_flatten, valid_ratios)
 
     def forward(self, feats, pad_mask=None, gt_meta=None):
-        if self.for_distill:
-            aux_refpoints = gt_meta.get('aux_refpoints', None)
-
         # input projection and embedding
         (feat_flatten, spatial_shapes, level_start_index, mask_flatten,
          lvl_pos_embed_flatten,
          valid_ratios) = self._get_encoder_input(feats, pad_mask)
-        # feat_flatten.shape [1, 17971, 256]
-
-        if self.for_distill:
-            self.distill_pairs['feat_flatten'] = feat_flatten
-            self.distill_pairs['spatial_shapes'] = spatial_shapes
-            self.distill_pairs['level_start_index'] = level_start_index
 
         # encoder
         memory = self.encoder(feat_flatten, spatial_shapes, level_start_index,
                               mask_flatten, lvl_pos_embed_flatten, valid_ratios)
-        # memory.shape [1, 17971, 256]
 
         # prepare denoising training
-        is_teacher = gt_meta.get('is_teacher', False)
-        if self.training and not is_teacher:
-            # prepare_for_cdn
-            # input_query_label, input_query_bbox, attn_mask, dn_meta
-            denoising_class, denoising_bbox_unact, attn_mask, dn_meta = \
+        if self.training:
+            denoising_class, denoising_bbox, attn_mask, dn_meta = \
                 get_contrastive_denoising_training_group(gt_meta,
                                             self.num_classes,
                                             self.num_queries,
@@ -554,131 +624,65 @@ class DINOTransformer(nn.Layer):
                                             self.num_denoising,
                                             self.label_noise_ratio,
                                             self.box_noise_scale)
-        else:
-            denoising_class, denoising_bbox_unact, attn_mask, dn_meta = None, None, None, None
-        # dn_meta:
-        # {'dn_positive_idx': [Tensor(shape=[100], dtype=int64, place=Place(gpu:0), stop_gradient=True,
-        #         [0  , 2  , 4  , 6  , 8  , 10 , 12 , 14 , 16 , 18 , 20 , 22 , 24 , 26)],
-        # 'dn_num_group': 100,
-        # 'dn_num_split': [200, 900]}
+            if self.dual_queries:
+                denoising_class_groups = []
+                denoising_bbox_groups = []
+                attn_mask_groups = []
+                dn_meta_groups = []
+                for g_id in range(self.dual_groups):
+                    denoising_class_gid, denoising_bbox_gid, attn_mask_gid, dn_meta_gid = \
+                        get_contrastive_denoising_training_group(gt_meta,
+                                                    self.num_classes,
+                                                    self.num_queries,
+                                                    self.denoising_class_embed_groups[g_id].weight,
+                                                    self.num_denoising,
+                                                    self.label_noise_ratio,
+                                                    self.box_noise_scale)
+                    denoising_class_groups.append(denoising_class_gid)
+                    denoising_bbox_groups.append(denoising_bbox_gid)
+                    attn_mask_groups.append(attn_mask_gid)
+                    dn_meta_groups.append(dn_meta_gid)
 
-        # tgt_embed is target,   refpoint_embed is init_ref_points_unact
-        target, init_ref_points_unact, enc_topk_bboxes, enc_topk_logits, \
-        enc_outputs_class, enc_outputs_coord_unact, enc_output_memory = \
+                # combine
+                denoising_class = [denoising_class] + denoising_class_groups
+                denoising_bbox = [denoising_bbox] + denoising_bbox_groups
+                attn_mask = [attn_mask] + attn_mask_groups
+                dn_meta = [dn_meta] + dn_meta_groups
+        else:
+            denoising_class, denoising_bbox, attn_mask, dn_meta = None, None, None, None
+
+        target, init_ref_points, enc_topk_bboxes, enc_topk_logits = \
             self._get_decoder_input(
             memory, spatial_shapes, mask_flatten, denoising_class,
-            denoising_bbox_unact)
-        # [2, 1100, 256] [2, 1100, 4] [2, 900, 4] [2, 900, 80] train
-        # [2, 900, 256] [2, 900, 4] [2, 900, 4] [2, 900, 80] val
+            denoising_bbox)
 
         # decoder
-        ### hs, reference, ref_undetach
-        # inter_feats, inter_ref_bboxes_unact, inter_ref_bboxes_unact_undetach = self.decoder(
-        inter_feats, inter_ref_bboxes_unact = self.decoder(
-            target, init_ref_points_unact, memory, spatial_shapes,
-            level_start_index, self.dec_bbox_head, self.query_pos_head,
-            valid_ratios, attn_mask, mask_flatten)
-        # [6, 1, 1100, 256] [6, 1, 1100, 4] train
-        # [6, 1, 900, 256] [6, 1, 900, 4] val
+        inter_feats, inter_ref_bboxes = self.decoder(
+            target, init_ref_points, memory, spatial_shapes, level_start_index,
+            self.dec_bbox_head, self.query_pos_head, valid_ratios, attn_mask,
+            mask_flatten)
+        # solve hang during distributed training
+        inter_feats[0] += self.denoising_class_embed.weight[0, 0] * 0.
+        if self.dual_queries:
+            for g_id in range(self.dual_groups):
+                inter_feats[0] += self.denoising_class_embed_groups[
+                    g_id].weight[0, 0] * 0.0
 
-        if aux_refpoints is not None:
-            # tgt_embed, refpoint_embed, attn_mask = aux_refpoints from teacher
-            # target, init_ref_points_unact, attn_mask = aux_refpoints from teacher
-            #hs_aux, ref_aux, ref_undetach_aux = self.decoder(
-            #inter_feats_aux, inter_ref_bboxes_unact_aux, inter_ref_bboxes_unact_aux_undetach = self.decoder(
-            inter_feats_aux, inter_ref_bboxes_unact_aux = self.decoder(
-                aux_refpoints[0], aux_refpoints[1], memory, spatial_shapes,
-                level_start_index, self.dec_bbox_head, self.query_pos_head,
-                valid_ratios, aux_refpoints[2], mask_flatten, sampling_locations=None)
-        else:
-            inter_feats_aux = None
-            inter_ref_bboxes_unact_aux = None
-
-        # return hs, references, hs_enc, ref_enc, init_box_proposal
-        # return hs, references, ref_undetach,  hs_enc, ref_enc, \
-        #        enc_outputs_class_unselected, enc_outputs_coord_unselected, enc_output_memory, \
-        #        hs_aux, ref_aux, ref_undetach_aux, hs_random, ref_random, ref_undetach_random, \
-        #        init_box_proposal, tgt_, refpoint_embed_, attn_mask
-
-        # hs, reference, ref_undetach, hs_enc, ref_enc, \
-        # enc_class, enc_coord, enc_memory, \
-        # hs_aux, ref_aux, ref_undetach_aux, hs_random, ref_random, ref_undetach_random, \ 
-        # init_box_proposal, tgt_embed, refpoint_embed, attn_mask
-
-
-        ### later in kd_dino.py
-        ### hs is inter_feats, reference is inter_ref_bboxes_unact+sigmoid
         out_bboxes = []
         out_logits = []
         for i in range(self.num_decoder_layers):
-            # [6, 1, 900, 256] -> [6, 1, 900, 4/80]      train 1100, eval/infer 900
-            out_logits.append(self.dec_score_head[i](inter_feats[i])) # inter_feats [6, 1, 1100, 256]
+            out_logits.append(self.dec_score_head[i](inter_feats[i]))
             if i == 0:
                 out_bboxes.append(
                     F.sigmoid(self.dec_bbox_head[i](inter_feats[i]) +
-                              init_ref_points_unact))
+                              inverse_sigmoid(init_ref_points)))
             else:
                 out_bboxes.append(
                     F.sigmoid(self.dec_bbox_head[i](inter_feats[i]) +
-                              inter_ref_bboxes_unact[i - 1])) # inter_ref_bboxes_unact [6, 1, 1100, 4]
-        # for i, (layer_ref_sig, layer_bbox_embed, layer_hs) in enumerate(zip(reference[:-1], self.bbox_embed, hs)):
-        #     layer_outputs_unsig = F.sigmoid(
-        #            self.bbox_embed[i](layer_hs) + inverse_sigmoid(layer_ref_sig))
-        #     outputs_coord_list.append(layer_outputs_unsig)
-        # outputs_coord_list = torch.stack(outputs_coord_list)   
+                              inverse_sigmoid(inter_ref_bboxes[i - 1])))
 
         out_bboxes = paddle.stack(out_bboxes)
         out_logits = paddle.stack(out_logits)
-
-        if self.for_distill and inter_feats_aux is not None:
-            aux_kd_out_bboxes = []
-            aux_kd_out_logits = []
-            for i in range(self.num_decoder_layers):
-                # [6, 1, 900, 256] -> [6, 1, 900, 4/80]
-                aux_kd_out_logits.append(self.dec_score_head[i](inter_feats_aux[i])) # inter_feats_aux [6, 1, 900, 256]
-                if i == 0:
-                    aux_kd_out_bboxes.append(
-                        F.sigmoid(self.dec_bbox_head[i](inter_feats_aux[i]) +
-                                aux_refpoints[1]))
-                else:
-                    aux_kd_out_bboxes.append(
-                        F.sigmoid(self.dec_bbox_head[i](inter_feats_aux[i]) +
-                                inter_ref_bboxes_unact_aux[i - 1])) # inter_ref_bboxes_unact_aux [6, 1, 900, 4]
-            # aux_outputs_coord_list = []
-            # for dec_lid, (aux_layer_ref_sig, layer_bbox_embed, aux_layer_hs) in enumerate(
-            #     zip(inter_ref_bboxes_unact_aux[:-1], self.dec_bbox_head, inter_feats_aux)):
-            #     # zip(ref_aux[:-1], self.bbox_embed, hs_aux)):
-            #         aux_layer_delta_unsig = layer_bbox_embed(aux_layer_hs)
-            #         aux_layer_outputs_unsig = aux_layer_delta_unsig  + inverse_sigmoid(aux_layer_ref_sig)
-            #         aux_layer_outputs_unsig = F.sigmoid(aux_layer_outputs_unsig)
-            #         aux_outputs_coord_list.append(aux_layer_outputs_unsig)
-            # aux_outputs_coord_list = paddle.stack(aux_outputs_coord_list)
-            # aux_outputs_class = paddle.stack([layer_cls_embed(layer_hs) for
-            #                                     layer_cls_embed, layer_hs in zip(self.class_embed, inter_feats_aux)])
-
-        if self.for_distill:
-            self.distill_pairs['hs'] = inter_feats
-            self.distill_pairs['reference'] = F.sigmoid(inter_ref_bboxes_unact) ### not sigmoid, but in torch sigmoid
-            self.distill_pairs['enc_class'] = enc_outputs_class
-            self.distill_pairs['enc_coord'] = enc_outputs_coord_unact
-            self.distill_pairs['enc_memory'] = enc_output_memory
-
-            self.distill_pairs['pred_logits'] = out_logits[-1]
-            self.distill_pairs['pred_boxes'] = out_bboxes[-1]
-
-            if inter_feats_aux is not None:
-                self.distill_pairs['aux_pred_logits'] = aux_kd_out_logits[-1]
-                self.distill_pairs['aux_pred_boxes'] = aux_kd_out_bboxes[-1]
-                self.distill_pairs['auxrf_aux_outputs'] = {}
-                self.distill_pairs['auxrf_aux_outputs']['pred_logits'] = aux_kd_out_logits[:-1]
-                self.distill_pairs['auxrf_aux_outputs']['pred_boxes'] = aux_kd_out_bboxes[:-1]
-                self.distill_pairs['aux_hs'] = inter_feats_aux # hs_aux
-                self.distill_pairs['aux_reference'] = F.sigmoid(inter_ref_bboxes_unact_aux) # ref_undetach_aux
-
-            self.distill_pairs['dn_meta'] = dn_meta
-            self.distill_pairs['refpoints'] = (target.detach(), init_ref_points_unact.detach(), attn_mask)
-
-        # [6, bs, 900, 4] [6, bs, 900, 80] [bs, 900, 4] [bs, 900, 80]
         return (out_bboxes, out_logits, enc_topk_bboxes, enc_topk_logits,
                 dn_meta)
 
@@ -722,26 +726,33 @@ class DINOTransformer(nn.Layer):
                                       paddle.to_tensor(float("inf")))
 
         memory = paddle.where(valid_mask, memory, paddle.to_tensor(0.))
-        enc_output_memory = self.enc_output[0](memory) # before bn
-        output_memory = self.enc_output[1](enc_output_memory)
-        return enc_output_memory, output_memory, output_anchors
+        if self.dual_queries:
+            output_memory = [
+                self.enc_output[g_id](memory)
+                for g_id in range(self.dual_groups + 1)
+            ]
+        else:
+            output_memory = self.enc_output[0](memory)
+        return output_memory, output_anchors
 
     def _get_decoder_input(self,
                            memory,
                            spatial_shapes,
                            memory_mask=None,
                            denoising_class=None,
-                           denoising_bbox_unact=None):
+                           denoising_bbox=None):
         bs, _, _ = memory.shape
         # prepare input for decoder
-        ### output_memory, output_proposals = gen_encoder_output_proposals(
-        enc_output_memory, output_memory, output_anchors = self._get_encoder_output_anchors(
+        output_memory, output_anchors = self._get_encoder_output_anchors(
             memory, spatial_shapes, memory_mask)
-        enc_outputs_class = self.enc_score_head(output_memory)
-        # enc_outputs_class_unselected
-        enc_outputs_coord_unact = self.enc_bbox_head(
-            output_memory) + output_anchors
-        # enc_outputs_coord_unselected
+        if self.dual_queries:
+            enc_outputs_class = self.enc_score_head(output_memory[0])
+            enc_outputs_coord_unact = self.enc_bbox_head(output_memory[
+                0]) + output_anchors
+        else:
+            enc_outputs_class = self.enc_score_head(output_memory)
+            enc_outputs_coord_unact = self.enc_bbox_head(
+                output_memory) + output_anchors
 
         _, topk_ind = paddle.topk(
             enc_outputs_class.max(-1), self.num_queries, axis=1)
@@ -749,35 +760,98 @@ class DINOTransformer(nn.Layer):
         batch_ind = paddle.arange(end=bs, dtype=topk_ind.dtype)
         batch_ind = batch_ind.unsqueeze(-1).tile([1, self.num_queries])
         topk_ind = paddle.stack([batch_ind, topk_ind], axis=-1)
-        reference_points_unact = paddle.gather_nd(enc_outputs_coord_unact,
-                                                  topk_ind)  # unsigmoided.
-        # refpoint_embed_undetach is reference_points_unact
-        # init_box_proposal = F.sigmoid(paddle.gather_nd(output_anchors,topk_ind))
-        enc_topk_bboxes = F.sigmoid(reference_points_unact)
-        # enc_topk_bboxes is ref_enc
-        if denoising_bbox_unact is not None:
-            reference_points_unact = paddle.concat(
-                [denoising_bbox_unact, reference_points_unact], 1)
+        topk_coords_unact = paddle.gather_nd(enc_outputs_coord_unact,
+                                             topk_ind)  # unsigmoided.
+        enc_topk_bboxes = F.sigmoid(topk_coords_unact)
+        reference_points = enc_topk_bboxes.detach()
         enc_topk_logits = paddle.gather_nd(enc_outputs_class, topk_ind)
+
+        if self.dual_queries:
+            enc_topk_logits_groups = []
+            enc_topk_bboxes_groups = []
+            reference_points_groups = []
+            topk_ind_groups = []
+            for g_id in range(self.dual_groups):
+                enc_outputs_class_gid = self.enc_score_head_dq[g_id](
+                    output_memory[g_id + 1])
+                enc_outputs_coord_unact_gid = self.enc_bbox_head_dq[g_id](
+                    output_memory[g_id + 1]) + output_anchors
+                _, topk_ind_gid = paddle.topk(
+                    enc_outputs_class_gid.max(-1), self.num_queries, axis=1)
+                # extract region proposal boxes
+                batch_ind = paddle.arange(end=bs, dtype=topk_ind_gid.dtype)
+                batch_ind = batch_ind.unsqueeze(-1).tile([1, self.num_queries])
+                topk_ind_gid = paddle.stack([batch_ind, topk_ind_gid], axis=-1)
+                topk_coords_unact_gid = paddle.gather_nd(
+                    enc_outputs_coord_unact_gid, topk_ind_gid)  # unsigmoided.
+                enc_topk_bboxes_gid = F.sigmoid(topk_coords_unact_gid)
+                reference_points_gid = enc_topk_bboxes_gid.detach()
+                enc_topk_logits_gid = paddle.gather_nd(enc_outputs_class_gid,
+                                                       topk_ind_gid)
+
+                # append and combine
+                topk_ind_groups.append(topk_ind_gid)
+                enc_topk_logits_groups.append(enc_topk_logits_gid)
+                enc_topk_bboxes_groups.append(enc_topk_bboxes_gid)
+                reference_points_groups.append(reference_points_gid)
+
+            enc_topk_bboxes = paddle.concat(
+                [enc_topk_bboxes] + enc_topk_bboxes_groups, 1)
+            enc_topk_logits = paddle.concat(
+                [enc_topk_logits] + enc_topk_logits_groups, 1)
+            reference_points = paddle.concat(
+                [reference_points] + reference_points_groups, 1)
+            topk_ind = paddle.concat([topk_ind] + topk_ind_groups, 1)
 
         # extract region features
         if self.learnt_init_query:
             target = self.tgt_embed.weight.unsqueeze(0).tile([bs, 1, 1])
+            if self.dual_queries:
+                target = paddle.concat([target] + [
+                    self.tgt_embed_dual[g_id].weight.unsqueeze(0).tile(
+                        [bs, 1, 1]) for g_id in range(self.dual_groups)
+                ], 1)
         else:
-            target = paddle.gather_nd(output_memory, topk_ind).detach()
-        if denoising_class is not None:
-            target = paddle.concat([denoising_class, target], 1)
+            if self.dual_queries:
+                target = paddle.gather_nd(output_memory[0], topk_ind)
+                target_groups = []
+                for g_id in range(self.dual_groups):
+                    target_gid = paddle.gather_nd(output_memory[g_id + 1],
+                                                  topk_ind_groups[g_id])
+                    target_groups.append(target_gid)
+                target = paddle.concat([target] + target_groups, 1).detach()
+            else:
+                target = paddle.gather_nd(output_memory, topk_ind).detach()
 
-        # if self.for_distill:
-        #     self.distill_pairs['proj_queries'] = paddle.gather_nd(output_memory, topk_ind).detach()
-        # return target, reference_points_unact.detach(
-        # ), enc_topk_bboxes, enc_topk_logits
-        # # return tgt_
+        if denoising_bbox is not None:
+            if isinstance(denoising_bbox, list) and isinstance(
+                    denoising_class, list) and self.dual_queries:
+                if denoising_bbox[0] is not None:
+                    reference_points_list = paddle.split(
+                        reference_points, self.dual_groups + 1, axis=1)
+                    reference_points = paddle.concat(
+                        [
+                            paddle.concat(
+                                [ref, ref_], axis=1)
+                            for ref, ref_ in zip(denoising_bbox,
+                                                 reference_points_list)
+                        ],
+                        axis=1)
 
-        return target, reference_points_unact.detach(), enc_topk_bboxes, enc_topk_logits, \
-                enc_outputs_class, enc_outputs_coord_unact, enc_output_memory
+                    target_list = paddle.split(
+                        target, self.dual_groups + 1, axis=1)
+                    target = paddle.concat(
+                        [
+                            paddle.concat(
+                                [tgt, tgt_], axis=1)
+                            for tgt, tgt_ in zip(denoising_class, target_list)
+                        ],
+                        axis=1)
+                else:
+                    reference_points, target = reference_points, target
+            else:
+                reference_points = paddle.concat(
+                    [denoising_bbox, reference_points], 1)
+                target = paddle.concat([denoising_class, target], 1)
 
-        # return hs_enc, ref_enc, \
-        #        enc_outputs_class_unselected, enc_outputs_coord_unselected, enc_output_memory, \
-        #        hs_aux, ref_aux, ref_undetach_aux, hs_random, ref_random, ref_undetach_random, \
-        #        init_box_proposal, tgt_, refpoint_embed_, attn_mask
+        return target, reference_points, enc_topk_bboxes, enc_topk_logits

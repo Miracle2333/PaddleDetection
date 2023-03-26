@@ -67,35 +67,43 @@ def load_weight(model, weight, optimizer=None, ema=None, exchange=True):
         weight = get_weights_path(weight)
 
     path = _strip_postfix(weight)
-    pdparam_path_s = path + '_s.pdparams'
-    pdparam_path_t = path + '_t.pdparams'
-    if not os.path.exists(pdparam_path_s):
+    pdparam_path = path + '.pdparams'
+    if not os.path.exists(pdparam_path):
         raise ValueError("Model pretrain path {} does not "
-                         "exists.".format(pdparam_path_s))
-    if not os.path.exists(pdparam_path_t):
-        raise ValueError("Model pretrain path {} does not "
-                         "exists.".format(pdparam_path_t))
-    
+                         "exists.".format(pdparam_path))
 
+    if ema is not None and os.path.exists(path + '.pdema'):
+        if exchange:
+            # Exchange model and ema_model to load
+            logger.info('Exchange model and ema_model to load:')
+            ema_state_dict = paddle.load(pdparam_path)
+            logger.info('Loading ema_model weights from {}'.format(path +
+                                                                   '.pdparams'))
+            param_state_dict = paddle.load(path + '.pdema')
+            logger.info('Loading model weights from {}'.format(path + '.pdema'))
+        else:
+            ema_state_dict = paddle.load(path + '.pdema')
+            logger.info('Loading ema_model weights from {}'.format(path +
+                                                                   '.pdema'))
+            param_state_dict = paddle.load(pdparam_path)
+            logger.info('Loading model weights from {}'.format(path +
+                                                               '.pdparams'))
+    else:
+        ema_state_dict = None
+        param_state_dict = paddle.load(pdparam_path)
 
-    ema_state_dict = None
-    param_state_dict_s = paddle.load(pdparam_path_s)
-    param_state_dict_t = paddle.load(pdparam_path_t)
-
-    model_dict_s = model.student.state_dict()
-    model_dict_t = model.teacher.state_dict()
-    model_weight_s = {}
-    model_weight_t = {}
+    model_dict = model.state_dict()
+    model_weight = {}
     incorrect_keys = 0
 
-    for key, value in model_dict_s.items():
-        if key in param_state_dict_s.keys():
-            if isinstance(param_state_dict_s[key], np.ndarray):
-                param_state_dict_s[key] = paddle.to_tensor(param_state_dict_s[key])
-            if value.dtype == param_state_dict_s[key].dtype:
-                model_weight_s[key] = param_state_dict_s[key]
+    for key, value in model_dict.items():
+        if key in param_state_dict.keys():
+            if isinstance(param_state_dict[key], np.ndarray):
+                param_state_dict[key] = paddle.to_tensor(param_state_dict[key])
+            if value.dtype == param_state_dict[key].dtype:
+                model_weight[key] = param_state_dict[key]
             else:
-                model_weight_s[key] = param_state_dict_s[key].astype(value.dtype)
+                model_weight[key] = param_state_dict[key].astype(value.dtype)
         else:
             logger.info('Unmatched key: {}'.format(key))
             incorrect_keys += 1
@@ -103,28 +111,11 @@ def load_weight(model, weight, optimizer=None, ema=None, exchange=True):
     assert incorrect_keys == 0, "Load weight {} incorrectly, \
             {} keys unmatched, please check again.".format(weight,
                                                            incorrect_keys)
-    logger.info('Finish resuming model_student weights: {}'.format(pdparam_path_s))
-    for key, value in model_dict_t.items():
-        if key in param_state_dict_t.keys():
-            if isinstance(param_state_dict_t[key], np.ndarray):
-                param_state_dict_t[key] = paddle.to_tensor(param_state_dict_t[key])
-            if value.dtype == param_state_dict_t[key].dtype:
-                model_weight_t[key] = param_state_dict_t[key]
-            else:
-                model_weight_t[key] = param_state_dict_t[key].astype(value.dtype)
-        else:
-            logger.info('Unmatched key: {}'.format(key))
-            incorrect_keys += 1
+    logger.info('Finish resuming model weights: {}'.format(pdparam_path))
 
-    assert incorrect_keys == 0, "Load weight {} incorrectly, \
-            {} keys unmatched, please check again.".format(weight,
-                                                           incorrect_keys)
-    logger.info('Finish resuming model_teacher weights: {}'.format(pdparam_path_t))
-    model.student.set_dict(model_weight_s)
-    model.teacher.set_dict(model_weight_t)
+    model.set_dict(model_weight)
 
     last_epoch = 0
-    last_iter = 0
     if optimizer is not None and os.path.exists(path + '.pdopt'):
         optim_state_dict = paddle.load(path + '.pdopt')
         # to solve resume bug, will it be fixed in paddle 2.0
@@ -132,11 +123,16 @@ def load_weight(model, weight, optimizer=None, ema=None, exchange=True):
             if not key in optim_state_dict.keys():
                 optim_state_dict[key] = optimizer.state_dict()[key]
         if 'last_epoch' in optim_state_dict:
-            last_epoch = optim_state_dict.pop('last_epoch')-1
-        if 'last_iter' in optim_state_dict:
-            last_iter = optim_state_dict.pop('last_iter')-1
+            last_epoch = optim_state_dict.pop('last_epoch')
         optimizer.set_state_dict(optim_state_dict)
-    return last_iter,last_epoch
+
+        if ema_state_dict is not None:
+            ema.resume(ema_state_dict,
+                       optim_state_dict['LR_Scheduler']['last_epoch'])
+    elif ema_state_dict is not None:
+        ema.resume(ema_state_dict)
+    return last_epoch
+
 
 def match_state_dict(model_state_dict, weight_state_dict):
     """
@@ -279,45 +275,4 @@ def save_model(model,
     state_dict = optimizer.state_dict()
     state_dict['last_epoch'] = last_epoch
     paddle.save(state_dict, save_path + ".pdopt")
-    logger.info("Save checkpoint: {}".format(save_dir))
-
-    
-def save_semi_model(
-               teacher_model,
-               student_model,
-               optimizer,
-               save_dir,
-               save_name,
-               last_epoch,
-               last_iter):
-    """
-    save teacher and student model into disk.
-    Args:
-        teacher_model (dict): the teacher_model state_dict to save parameters.
-        student_model (dict): the student_model state_dict to save parameters.
-        optimizer (paddle.optimizer.Optimizer): the Optimizer instance to
-            save optimizer states.
-        save_dir (str): the directory to be saved.
-        save_name (str): the path to be saved.
-        last_epoch (int): the epoch index.
-        last_iter (int): the iter index.
-    """
-    if paddle.distributed.get_rank() != 0:
-        return
-    assert isinstance(teacher_model, dict), ("teacher_model is not a instance of dict, "
-                                     "please call teacher_model.state_dict() to get.")
-    assert isinstance(student_model, dict), ("student_model is not a instance of dict, "
-                                     "please call student_model.state_dict() to get.")
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    save_path = os.path.join(save_dir, save_name)
-    # save model
-    paddle.save(teacher_model, save_path +str(last_epoch)+"epoch_t.pdparams")
-    paddle.save(student_model, save_path +str(last_epoch)+"epoch_s.pdparams")
-
-    # save optimizer
-    state_dict = optimizer.state_dict()
-    state_dict['last_epoch'] = last_epoch
-    state_dict['last_iter'] = last_iter
-    paddle.save(state_dict, save_path + str(last_epoch)+"epoch.pdopt")
     logger.info("Save checkpoint: {}".format(save_dir))

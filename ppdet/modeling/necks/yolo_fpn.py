@@ -58,6 +58,7 @@ class YoloDetBlock(nn.Layer):
                  data_format='NCHW'):
         """
         YOLODetBlock layer for yolov3, see https://arxiv.org/abs/1804.02767
+
         Args:
             ch_in (int): input channel
             channel (int): base channel
@@ -123,6 +124,7 @@ class SPP(nn.Layer):
                  data_format='NCHW'):
         """
         SPP layer, which consist of four pooling layer follwed by conv layer
+
         Args:
             ch_in (int): input channel of conv layer
             ch_out (int): output channel of conv layer
@@ -182,6 +184,7 @@ class CoordConv(nn.Layer):
                  data_format='NCHW'):
         """
         CoordConv layer, see https://arxiv.org/abs/1807.03247
+
         Args:
             ch_in (int): input channel
             ch_out (int): output channel
@@ -190,6 +193,7 @@ class CoordConv(nn.Layer):
             norm_type (str): batch norm type, default bn
             name (str): layer name
             data_format (str): data format, NCHW or NHWC
+
         """
         super(CoordConv, self).__init__()
         self.conv = ConvBNLayer(
@@ -217,6 +221,7 @@ class PPYOLODetBlock(nn.Layer):
     def __init__(self, cfg, name, data_format='NCHW'):
         """
         PPYOLODetBlock layer
+
         Args:
             cfg (list): layer configs for this block
             name (str): block name
@@ -321,6 +326,7 @@ class PPYOLODetBlockCSP(nn.Layer):
                  data_format='NCHW'):
         """
         PPYOLODetBlockCSP layer
+
         Args:
             cfg (list): layer configs for this block
             ch_in (int): input channel
@@ -388,10 +394,12 @@ class YOLOv3FPN(nn.Layer):
                  data_format='NCHW'):
         """
         YOLOv3FPN layer
+
         Args:
             in_channels (list): input channels for fpn
             norm_type (str): batch norm type, default bn
             data_format (str): data format, NCHW or NHWC
+
         """
         super(YOLOv3FPN, self).__init__()
         assert len(in_channels) > 0, "in_channels length should > 0"
@@ -495,6 +503,7 @@ class PPYOLOFPN(nn.Layer):
                  spp=False):
         """
         PPYOLOFPN layer
+
         Args:
             in_channels (list): input channels for fpn
             norm_type (str): batch norm type, default bn
@@ -505,6 +514,7 @@ class PPYOLOFPN(nn.Layer):
             block_size (int): block size of DropBlock
             keep_prob (float): keep probability of DropBlock
             spp (bool): whether use spp or not
+
         """
         super(PPYOLOFPN, self).__init__()
         assert len(in_channels) > 0, "in_channels length should > 0"
@@ -793,6 +803,7 @@ class PPYOLOPAN(nn.Layer):
                  spp=False):
         """
         PPYOLOPAN layer with SPP, DropBlock and CSP connection.
+
         Args:
             in_channels (list): input channels for fpn
             norm_type (str): batch norm type, default bn
@@ -803,6 +814,7 @@ class PPYOLOPAN(nn.Layer):
             block_size (int): block size of DropBlock
             keep_prob (float): keep probability of DropBlock
             spp (bool): whether use spp or not
+
         """
         super(PPYOLOPAN, self).__init__()
         assert len(in_channels) > 0, "in_channels length should > 0"
@@ -1139,7 +1151,7 @@ class YOLOCSPPAN(nn.Layer):
 
         return pos_emb
 
-    def forward(self, feats, for_mot=False,is_teacher=True):
+    def forward(self, feats, for_mot=False):
         assert len(feats) == len(self.in_channels)
         if self.proj_dim is not None:
             for idx in range(len(self.proj_dim)):
@@ -1152,7 +1164,7 @@ class YOLOCSPPAN(nn.Layer):
 
                 # flatten [B, C, H, W] to [B, HxW, C]
                 src_flatten = last_feat.flatten(2).transpose([0, 2, 1])
-                if self.eval_size is not None and not self.training and not is_teacher:
+                if self.eval_size is not None and not self.training:
                     if stride == 8:
                         pos_embed = self.pos_embed_p3
                     elif stride == 16:

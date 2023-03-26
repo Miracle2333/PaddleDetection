@@ -603,10 +603,7 @@ class PhotoMetricDistortion(BaseOperator):
     """Apply photometric distortion to image sequentially, every transformation
     is applied with a probability of 0.5. The position of random contrast is in
     second or second to last.
-<<<<<<< HEAD
-=======
 
->>>>>>> exp_merge_base_dino
     1. random brightness
     2. random contrast (mode 0)
     3. convert color from BGR to HSV
@@ -615,10 +612,7 @@ class PhotoMetricDistortion(BaseOperator):
     6. convert color from HSV to BGR
     7. random contrast (mode 1)
     8. randomly swap channels
-<<<<<<< HEAD
-=======
 
->>>>>>> exp_merge_base_dino
     Args:
         brightness_delta (int): delta of brightness.
         contrast_range (tuple): range of contrast.
@@ -639,15 +633,10 @@ class PhotoMetricDistortion(BaseOperator):
 
     def apply(self, results, context=None):
         """Call function to perform photometric distortion on images.
-<<<<<<< HEAD
-        Args:
-            results (dict): Result dict from loading pipeline.
-=======
 
         Args:
             results (dict): Result dict from loading pipeline.
 
->>>>>>> exp_merge_base_dino
         Returns:
             dict: Result dict with images distorted.
         """
@@ -827,6 +816,10 @@ class RandomFlip(BaseOperator):
             im = self.apply_image(im)
             if 'gt_bbox' in sample and len(sample['gt_bbox']) > 0:
                 sample['gt_bbox'] = self.apply_bbox(sample['gt_bbox'], width)
+            if 'proposal_bbox' in sample and len(sample['proposal_bbox']) > 0:
+                for i in range(len(sample['proposal_bbox'])):
+                    sample['proposal_bbox'][i] = self.apply_bbox(
+                        sample['proposal_bbox'][i], width)
             if 'gt_poly' in sample and len(sample['gt_poly']) > 0:
                 sample['gt_poly'] = self.apply_segm(sample['gt_poly'], height,
                                                     width)
@@ -1007,6 +1000,13 @@ class Resize(BaseOperator):
             sample['gt_bbox'] = self.apply_bbox(sample['gt_bbox'],
                                                 [im_scale_x, im_scale_y],
                                                 [resize_w, resize_h])
+        
+        # apply bbox
+        if 'proposal_bbox' in sample and len(sample['proposal_bbox']) > 0:
+            for i in range(len(sample['proposal_bbox'])):
+                sample['proposal_bbox'][i] = self.apply_bbox(
+                    sample['proposal_bbox'][i], [im_scale_x, im_scale_y],
+                    [resize_w, resize_h])
 
         # apply areas
         if 'gt_areas' in sample:
@@ -1612,8 +1612,6 @@ class RandomCrop(BaseOperator):
             # only used in semi-det as unsup data
             sample = self.set_fake_bboxes(sample)
             sample = self.random_crop(sample, fake_bboxes=True)
-            del sample['gt_bbox']
-            del sample['gt_class']
             return sample
 
         if 'gt_bbox' in sample and len(sample['gt_bbox']) == 0:
@@ -1722,6 +1720,23 @@ class RandomCrop(BaseOperator):
                     return sample
 
                 sample['gt_bbox'] = np.take(cropped_box, valid_ids, axis=0)
+                if 'proposal_bbox' in sample and len(sample[
+                        'proposal_bbox']) > 0:
+                    for i in range(len(sample['proposal_bbox'])):
+                        cropped_proposal, valid_proposal_ids = self._crop_box_with_center_constraint(
+                            sample['proposal_bbox'][i],
+                            np.array(
+                                crop_box, dtype=np.float32))
+                        sample['proposal_bbox'][i] = np.take(
+                            cropped_proposal, valid_proposal_ids, axis=0)
+                        sample['proposal_class'][i] = np.take(
+                            sample['proposal_class'][i],
+                            valid_proposal_ids,
+                            axis=0)
+                        sample['proposal_score'][i] = np.take(
+                            sample['proposal_score'][i],
+                            valid_proposal_ids,
+                            axis=0)
                 sample['gt_class'] = np.take(
                     sample['gt_class'], valid_ids, axis=0)
                 if 'gt_score' in sample:
@@ -2033,29 +2048,33 @@ class NormalizeBox(BaseOperator):
 
     def apply(self, sample, context):
         im = sample['image']
-        if  'gt_bbox' in sample.keys():
-            gt_bbox = sample['gt_bbox']
-            height, width, _ = im.shape
-            for i in range(gt_bbox.shape[0]):
-                gt_bbox[i][0] = gt_bbox[i][0] / width
-                gt_bbox[i][1] = gt_bbox[i][1] / height
-                gt_bbox[i][2] = gt_bbox[i][2] / width
-                gt_bbox[i][3] = gt_bbox[i][3] / height
-            sample['gt_bbox'] = gt_bbox
+        gt_bbox = sample['gt_bbox']
+        height, width, _ = im.shape
+        for i in range(gt_bbox.shape[0]):
+            gt_bbox[i][0] = gt_bbox[i][0] / width
+            gt_bbox[i][1] = gt_bbox[i][1] / height
+            gt_bbox[i][2] = gt_bbox[i][2] / width
+            gt_bbox[i][3] = gt_bbox[i][3] / height
+        sample['gt_bbox'] = gt_bbox
 
-            if 'gt_keypoint' in sample.keys():
-                gt_keypoint = sample['gt_keypoint']
+        if 'proposal_bbox' in sample and len(sample['proposal_bbox']) > 0:
+            for i in range(len(sample['proposal_bbox'])):
+                proposal_bbox = sample['proposal_bbox'][i]
+                proposal_bbox[:, 0::2] = proposal_bbox[:, 0::2] / width
+                proposal_bbox[:, 1::2] = proposal_bbox[:, 1::2] / height
+                sample['proposal_bbox'][i] = proposal_bbox
 
-                for i in range(gt_keypoint.shape[1]):
-                    if i % 2:
-                        gt_keypoint[:, i] = gt_keypoint[:, i] / height
-                    else:
-                        gt_keypoint[:, i] = gt_keypoint[:, i] / width
-                sample['gt_keypoint'] = gt_keypoint
+        if 'gt_keypoint' in sample.keys():
+            gt_keypoint = sample['gt_keypoint']
 
-            return sample
-        else:
-            return sample
+            for i in range(gt_keypoint.shape[1]):
+                if i % 2:
+                    gt_keypoint[:, i] = gt_keypoint[:, i] / height
+                else:
+                    gt_keypoint[:, i] = gt_keypoint[:, i] / width
+            sample['gt_keypoint'] = gt_keypoint
+
+        return sample
 
 
 @register_op
@@ -2068,15 +2087,18 @@ class BboxXYXY2XYWH(BaseOperator):
         super(BboxXYXY2XYWH, self).__init__()
 
     def apply(self, sample, context=None):
-        if  'gt_bbox' in sample.keys():
-            bbox = sample['gt_bbox']
-            bbox[:, 2:4] = bbox[:, 2:4] - bbox[:, :2]
-            bbox[:, :2] = bbox[:, :2] + bbox[:, 2:4] / 2.
-            sample['gt_bbox'] = bbox
-            return sample
-        else:
-            return sample
-
+        assert 'gt_bbox' in sample
+        bbox = sample['gt_bbox']
+        bbox[:, 2:4] = bbox[:, 2:4] - bbox[:, :2]
+        bbox[:, :2] = bbox[:, :2] + bbox[:, 2:4] / 2.
+        sample['gt_bbox'] = bbox
+        if 'proposal_bbox' in sample:
+            for i in range(len(sample['proposal_bbox'])):
+                proposal = sample['proposal_bbox'][i]
+                proposal[:, 2:4] = proposal[:, 2:4] - proposal[:, :2]
+                proposal[:, :2] = proposal[:, :2] + proposal[:, 2:4] / 2.
+                sample['proposal_bbox'][i] = proposal
+        return sample
 
 
 @register_op
@@ -2318,6 +2340,11 @@ class Pad(BaseOperator):
             return sample
         if 'gt_bbox' in sample and len(sample['gt_bbox']) > 0:
             sample['gt_bbox'] = self.apply_bbox(sample['gt_bbox'], offsets)
+        
+        if 'proposal_bbox' in sample and len(sample['proposal_bbox']) > 0:
+            for i in range(len(sample['proposal_bbox'])):
+                sample['proposal_bbox'][i] = self.apply_bbox(
+                    sample['proposal_bbox'][i], offsets)
 
         if 'gt_poly' in sample and len(sample['gt_poly']) > 0:
             sample['gt_poly'] = self.apply_segm(sample['gt_poly'], offsets,
@@ -2751,7 +2778,9 @@ class RandomSelect(BaseOperator):
     """
     Randomly choose a transformation between transforms1 and transforms2,
     and the probability of choosing transforms1 is p.
+
     The code is based on https://github.com/facebookresearch/detr/blob/main/datasets/transforms.py
+
     """
 
     def __init__(self, transforms1, transforms2, p=0.5):
@@ -2771,13 +2800,9 @@ class RandomSelects(BaseOperator):
     """
     Randomly choose a transformation between transforms1 and transforms2,
     and the probability of choosing transforms1 is p.
-<<<<<<< HEAD
-    The code is based on https://github.com/facebookresearch/detr/blob/main/datasets/transforms.py
-=======
 
     The code is based on https://github.com/facebookresearch/detr/blob/main/datasets/transforms.py
 
->>>>>>> exp_merge_base_dino
     """
 
     def __init__(self, transforms_list, p=None):
@@ -2886,6 +2911,12 @@ class RandomShortSideResize(BaseOperator):
         if 'gt_bbox' in sample and len(sample['gt_bbox']) > 0:
             sample['gt_bbox'] = self.apply_bbox(
                 sample['gt_bbox'], [im_scale_x, im_scale_y], target_size)
+
+        if 'proposal_bbox' in sample and len(sample['proposal_bbox']) > 0:
+            for i in range(len(sample['proposal_bbox'])):
+                sample['proposal_bbox'][i] = self.apply_bbox(
+                    sample['proposal_bbox'][i], [im_scale_x, im_scale_y],
+                    target_size)   
         # apply polygon
         if 'gt_poly' in sample and len(sample['gt_poly']) > 0:
             sample['gt_poly'] = self.apply_segm(sample['gt_poly'], im.shape[:2],
@@ -3106,14 +3137,34 @@ class RandomSizeCrop(BaseOperator):
                 sample['is_crowd'] = sample['is_crowd'][keep_index] if len(
                     keep_index) > 0 else np.zeros(
                         [0, 1], dtype=np.float32)
-            if 'gt_areas' in sample:
-                sample['gt_areas'] = np.take(
-                    sample['gt_areas'], keep_index, axis=0)
 
         image_shape = sample['image'].shape[:2]
         sample['image'] = self.paddle_crop(sample['image'], *region)
         sample['im_shape'] = np.array(
             sample['image'].shape[:2], dtype=np.float32)
+
+        if 'proposal_bbox' in sample and len(sample['proposal_bbox']) > 0:
+            for i in range(len(sample['proposal_bbox'])):
+                croped_proposal = self.apply_bbox(sample['proposal_bbox'][i],
+                                                  region)
+                proposal = croped_proposal.reshape([-1, 2, 2])
+                area = (proposal[:, 1, :] - proposal[:, 0, :]).prod(axis=1)
+                keep_index = np.where(area > 0)[0]
+
+                if len(keep_index) > 0:
+                    # print(f'keep_index: {type(keep_index), keep_index.shape}')
+                    sample['proposal_bbox'][i] = croped_proposal[keep_index]
+                    sample['proposal_class'][i] = sample['proposal_class'][i][
+                        keep_index]
+                    sample['proposal_score'][i] = sample['proposal_score'][i][
+                        keep_index]
+                else:
+                    sample['proposal_bbox'][i] = np.zeros(
+                        [0, 4], dtype=np.float32)
+                    sample['proposal_class'][i] = np.zeros(
+                        [0, 1], dtype=np.int32)
+                    sample['proposal_score'][i] = np.zeros(
+                        [0, 1], dtype=np.float32)
 
         # apply polygon
         if 'gt_poly' in sample and len(sample['gt_poly']) > 0:
@@ -3500,10 +3551,12 @@ class CenterRandColor(BaseOperator):
 class Mosaic(BaseOperator):
     """ Mosaic operator for image and gt_bboxes
     The code is based on https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/data/datasets/mosaicdetection.py
+
     1. get mosaic coords
     2. clip bbox and get mosaic_labels
     3. random_affine augment
     4. Mixup augment as copypaste (optinal), not used in tiny/nano
+
     Args:
         prob (float): probability of using Mosaic, 1.0 as default
         input_dim (list[int]): input shape
@@ -3851,6 +3904,7 @@ class Mosaic(BaseOperator):
 @register_op
 class PadResize(BaseOperator):
     """ PadResize for image and gt_bbbox
+
     Args:
         target_size (list[int]): input shape
         fill_value (float): pixel value of padded image
@@ -3903,6 +3957,7 @@ class PadResize(BaseOperator):
 class RandomShift(BaseOperator):
     """
     Randomly shift image
+
     Args:
         prob (float): probability to do random shift.
         max_shift (int): max shift pixels
