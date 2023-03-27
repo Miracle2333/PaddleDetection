@@ -169,7 +169,6 @@ class BatchRandomResize(BaseOperator):
         resizer = Resize(target_size, keep_ratio=self.keep_ratio, interp=interp)
         return [resizer(samples, context=context),index]
 
-
 @register_op
 class Gt2YoloTarget(BaseOperator):
     __shared__ = ['num_classes']

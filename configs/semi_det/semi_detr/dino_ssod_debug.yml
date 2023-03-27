@@ -6,8 +6,8 @@ _BASE_: [
 ]
 
 #for debug
-eval_interval: 3600
-save_interval: 3600
+eval_interval: 1800
+save_interval: 1800
 weights: output/semi_detr_semi005_size_600_1000/model_final
 find_unused_parameters: True
 save_dir: output
@@ -49,8 +49,8 @@ SemiTrainReader:
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  sup_batch_size: 2
-  unsup_batch_size: 2
+  sup_batch_size: 4
+  unsup_batch_size: 4
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -78,8 +78,8 @@ TestReader:
   drop_last: false
 
 
-pretrain_student_weights: http://10.255.125.21:8084/pp-dino_sup005_390.pdparams
-pretrain_teacher_weights: http://10.255.125.21:8084/pp-dino_sup005_390.pdparams
+pretrain_student_weights: output/dino_r50vd_pan_3_0_6_5x_coco/best_model.pdparams
+pretrain_teacher_weights: output/dino_r50vd_pan_3_0_6_5x_coco/best_model.pdparams
 # pretrain_weights: pp-dino_sup005_390.pdparams
 architecture: DETR
 
@@ -167,40 +167,33 @@ DETR_SSOD:
   test_cfg:
     inference_on: teacher
 
-
-
+# partial labeled COCO, use `SemiCOCODataSet` rather than `COCODataSet`
 metric: COCO
-num_classes: 80
-
+num_classes: 20
+#before train, change voc to coco with voc2coco.py
 # partial labeled COCO, use `SemiCOCODataSet` rather than `COCODataSet`
 TrainDataset:
   !SemiCOCODataSet
-    image_dir: train2017
-    anno_path: semi_annotations/instances_train2017.1@5.json
-    dataset_dir: dataset/coco
+    image_dir: VOC2007/JPEGImages
+    anno_path: PseudoAnnotations/VOC2007_trainval.json
+    dataset_dir:  dataset/voc/VOCdevkit
     data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
+
 # partial unlabeled COCO, use `SemiCOCODataSet` rather than `COCODataSet`
 UnsupTrainDataset:
   !SemiCOCODataSet
-    image_dir: train2017
-    anno_path: semi_annotations/instances_train2017.1@5-unlabeled.json
-    dataset_dir: dataset/coco
+    image_dir: VOC2012/JPEGImages
+    anno_path: PseudoAnnotations/VOC2012_trainval.json
+    dataset_dir: dataset/voc/VOCdevkit
     data_fields: ['image']
     supervised: False
 
 EvalDataset:
   !COCODataSet
-    image_dir: val2017
-    anno_path: annotations/instances_val2017.json
-    dataset_dir: dataset/coco
+    image_dir: VOC2007/JPEGImages
+    anno_path: PseudoAnnotations/VOC2007_test.json
+    dataset_dir:  dataset/voc/VOCdevkit/
     allow_empty: true
-
-TestDataset:
-  !ImageFolder
-    anno_path: annotations/instances_val2017.json # also support txt (like VOC's label_list.txt)
-    dataset_dir: dataset/coco # if set, anno_path will be 'dataset_dir/anno_path'
-
-epoch: 180 #epoch: 60
 
 LearningRate:
   base_lr: 0.0002
