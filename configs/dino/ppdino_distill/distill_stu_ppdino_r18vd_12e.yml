@@ -10,7 +10,7 @@ weights: output/dino_r18vd_pan_3_0_6_1x_coco/model_final
 find_unused_parameters: True
 log_iter: 350
 snapshot_epoch: 1
-save_dir: ./output/teach_kd_5
+save_dir: ./output/teach_kd_teach
 
 
 pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet18_vd_pretrained.pdparams

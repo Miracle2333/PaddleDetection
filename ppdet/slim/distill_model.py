@@ -492,7 +492,7 @@ class KDDETRDistillModel(DistillModel):
             kd_loss = sum(losses[k] * self.distill_loss.weight_dict[k] for k in losses.keys() if k in self.distill_loss.weight_dict)
 
             det_total_loss = student_loss['loss']
-            total_loss = det_total_loss + kd_loss * 5
+            total_loss = det_total_loss + kd_loss * 2
             student_loss['loss'] = total_loss
             student_loss['stu_loss'] = det_total_loss
             student_loss['kd_loss'] = kd_loss
