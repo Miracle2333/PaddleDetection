@@ -135,6 +135,7 @@ def load_weight(model, weight, optimizer=None, ema=None, exchange=True):
             last_epoch = optim_state_dict.pop('last_epoch')-1
         if 'last_iter' in optim_state_dict:
             last_iter = optim_state_dict.pop('last_iter')-1
+        else: last_iter=0
         optimizer.set_state_dict(optim_state_dict)
     return last_iter,last_epoch
 

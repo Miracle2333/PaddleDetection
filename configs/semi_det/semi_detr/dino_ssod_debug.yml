@@ -49,8 +49,8 @@ SemiTrainReader:
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  sup_batch_size: 4
-  unsup_batch_size: 4
+  sup_batch_size: 2
+  unsup_batch_size: 2
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -78,8 +78,8 @@ TestReader:
   drop_last: false
 
 
-pretrain_student_weights: output/dino_r50vd_pan_3_0_6_5x_coco/best_model.pdparams
-pretrain_teacher_weights: output/dino_r50vd_pan_3_0_6_5x_coco/best_model.pdparams
+pretrain_student_weights: best_model.pdparams
+pretrain_teacher_weights: best_model.pdparams
 # pretrain_weights: pp-dino_sup005_390.pdparams
 architecture: DETR
 
@@ -195,6 +195,7 @@ EvalDataset:
     dataset_dir:  dataset/voc/VOCdevkit/
     allow_empty: true
 
+epoch: 180
 LearningRate:
   base_lr: 0.0002
   schedulers:
