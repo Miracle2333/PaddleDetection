@@ -2,9 +2,8 @@ worker_num: 2
 TrainReader:
   sample_transforms:
     - Decode: {}
-    #- DecodeCache: {cache_root: 'dataset/coco/cache/buffer'}
     - RandomDistort: {prob: 0.8}
-    - RandomExpand: {fill_value: [0., 0., 0.]}
+    - RandomExpand: {fill_value: [123.675, 116.28, 103.53]}
     - RandomCrop: {prob: 0.8}
     - RandomFlip: {}
   batch_transforms:
@@ -13,7 +12,7 @@ TrainReader:
     - NormalizeBox: {}
     - BboxXYXY2XYWH: {}
     - Permute: {}
-  batch_size: 4
+  batch_size: 2
   shuffle: true
   drop_last: true
   collate_batch: false
@@ -23,7 +22,7 @@ TrainReader:
 EvalReader:
   sample_transforms:
     - Decode: {}
-    - Resize: {target_size: [640, 640], keep_ratio: False}
+    - Resize: {target_size: [640, 640], keep_ratio: False, interp: 2}
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
     - Permute: {}
   batch_size: 2
@@ -32,9 +31,11 @@ EvalReader:
 
 
 TestReader:
+  inputs_def:
+    image_shape: [3, 640, 640]
   sample_transforms:
     - Decode: {}
-    - Resize: { target_size: [640, 640], keep_ratio: False }
+    - Resize: {target_size: [640, 640], keep_ratio: False, interp: 2}
     - NormalizeImage: {mean: [0., 0., 0.], std: [1., 1., 1.], norm_type: none}
     - Permute: {}
   batch_size: 1

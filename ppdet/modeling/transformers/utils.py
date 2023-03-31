@@ -66,10 +66,13 @@ def sigmoid_focal_loss(logit, label, normalizer=1.0, alpha=0.25, gamma=2.0, loss
     return loss.mean(1).sum() / normalizer
 
 
-def inverse_sigmoid(x, eps=1e-6):
-    x = x.clip(min=0., max=1.)
-    return paddle.log(x / (1 - x + eps) + eps)
+#def inverse_sigmoid(x, eps=1e-6):
+#    x = x.clip(min=0., max=1.)
+#    return paddle.log(x / (1 - x + eps) + eps)
 
+def inverse_sigmoid(x, eps=1e-5):
+    x = x.clip(min=0., max=1.)
+    return paddle.log(x.clip(min=eps) / (1 - x).clip(min=eps))
 
 def deformable_attention_core_func(value, value_spatial_shapes,
                                    value_level_start_index, sampling_locations,

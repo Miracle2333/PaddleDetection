@@ -39,6 +39,75 @@ from .utils import (_get_clones, get_sine_pos_embed,
 __all__ = ['PPDETRTransformer']
 
 
+class PPMSDeformableAttention(MSDeformableAttention):
+    def forward(self,
+                query,
+                reference_points,
+                value,
+                value_spatial_shapes,
+                value_level_start_index,
+                value_mask=None):
+        """
+        Args:
+            query (Tensor): [bs, query_length, C]
+            reference_points (Tensor): [bs, query_length, n_levels, 2], range in [0, 1], top-left (0,0),
+                bottom-right (1, 1), including padding area
+            value (Tensor): [bs, value_length, C]
+            value_spatial_shapes (List): [n_levels, 2], [(H_0, W_0), (H_1, W_1), ..., (H_{L-1}, W_{L-1})]
+            value_level_start_index (List): [n_levels], [0, H_0*W_0, H_0*W_0+H_1*W_1, ...]
+            value_mask (Tensor): [bs, value_length], True for non-padding elements, False for padding elements
+        Returns:
+            output (Tensor): [bs, Length_{query}, C]
+        """
+        bs, Len_q = query.shape[:2]
+        Len_v = value.shape[1]
+
+        value = self.value_proj(value)
+        if value_mask is not None:
+            value_mask = value_mask.astype(value.dtype).unsqueeze(-1)
+            value *= value_mask
+        value = value.reshape([bs, Len_v, self.num_heads, self.head_dim])
+
+        sampling_offsets = self.sampling_offsets(query).reshape(
+            [bs, Len_q, self.num_heads, self.num_levels, self.num_points, 2])
+        attention_weights = self.attention_weights(query).reshape(
+            [bs, Len_q, self.num_heads, self.num_levels * self.num_points])
+        attention_weights = F.softmax(attention_weights).reshape(
+            [bs, Len_q, self.num_heads, self.num_levels, self.num_points])
+
+        if reference_points.shape[-1] == 2:
+            offset_normalizer = paddle.to_tensor(value_spatial_shapes)
+            offset_normalizer = offset_normalizer.flip([1]).reshape(
+                [1, 1, 1, self.num_levels, 1, 2])
+            sampling_locations = reference_points.reshape([
+                bs, Len_q, 1, self.num_levels, 1, 2
+            ]) + sampling_offsets / offset_normalizer
+        elif reference_points.shape[-1] == 4:
+            sampling_locations = (
+                reference_points[:, :, None, :, None, :2] + sampling_offsets /
+                self.num_points * reference_points[:, :, None, :, None, 2:] *
+                0.5)
+        else:
+            raise ValueError(
+                "Last dim of reference_points must be 2 or 4, but get {} instead.".
+                format(reference_points.shape[-1]))
+
+        if not isinstance(query, paddle.Tensor):
+            from ppdet.modeling.transformers.utils import deformable_attention_core_func
+            output = deformable_attention_core_func(
+                value, value_spatial_shapes, value_level_start_index,
+                sampling_locations, attention_weights)
+        else:
+            value_spatial_shapes = paddle.to_tensor(value_spatial_shapes)
+            value_level_start_index = paddle.to_tensor(value_level_start_index)
+            output = self.ms_deformable_attn_core(
+                value, value_spatial_shapes, value_level_start_index,
+                sampling_locations, attention_weights)
+        output = self.output_proj(output)
+
+        return output
+
+
 class TransformerDecoderLayer(nn.Layer):
     def __init__(self,
                  d_model=256,
@@ -61,8 +130,10 @@ class TransformerDecoderLayer(nn.Layer):
             bias_attr=ParamAttr(regularizer=L2Decay(0.0)))
 
         # cross attention
-        self.cross_attn = MSDeformableAttention(d_model, n_head, n_levels,
-                                                n_points, 1.0)
+        #self.cross_attn = MSDeformableAttention(d_model, n_head, n_levels,
+        #                                        n_points, 1.0)
+        self.cross_attn = PPMSDeformableAttention(d_model, n_head, n_levels,
+                                                  n_points, 1.0)
         self.dropout2 = nn.Dropout(dropout)
         self.norm2 = nn.LayerNorm(
             d_model,
@@ -107,7 +178,11 @@ class TransformerDecoderLayer(nn.Layer):
         # self attention
         q = k = self.with_pos_embed(tgt, query_pos_embed)
         if attn_mask is not None:
-            attn_mask = attn_mask.astype('bool')
+            #attn_mask = attn_mask.astype('bool')
+            attn_mask = paddle.where(
+                attn_mask.astype('bool'),
+                paddle.zeros(attn_mask.shape, tgt.dtype),
+                paddle.full(attn_mask.shape, float("-inf"), tgt.dtype))
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=attn_mask)
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
@@ -155,7 +230,8 @@ class TransformerDecoder(nn.Layer):
             ref_points_input = ref_points.detach().unsqueeze(2)
             query_pos_embed = get_sine_pos_embed(ref_points_input[..., 0, :],
                                                  self.hidden_dim // 2)
-            query_pos_embed = query_pos_head(query_pos_embed)
+            #query_pos_embed = query_pos_head(query_pos_embed)
+            query_pos_embed = query_pos_head(inverse_sigmoid(ref_points))
 
             output = layer(output, ref_points_input, memory,
                            memory_spatial_shapes, memory_level_start_index,
@@ -172,8 +248,7 @@ class TransformerDecoder(nn.Layer):
                     dec_out_bboxes.append(
                         F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
                             ref_points)))
-            else:
-                if i == len(self.layers) - 1:
+            elif i == len(self.layers) - 1:
                     dec_out_bboxes.append(inter_ref_bbox)
                     dec_out_logits.append(score_head[i](output))
 
