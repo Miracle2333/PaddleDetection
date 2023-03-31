@@ -19,7 +19,6 @@ from __future__ import print_function
 import paddle
 import paddle.nn as nn
 
-from numbers import Number
 from ppdet.core.workspace import register, create, load_config
 from ppdet.utils.checkpoint import load_pretrain_weight
 from ppdet.utils.logger import setup_logger
@@ -30,10 +29,7 @@ __all__ = [
     'FGDDistillModel',
     'CWDDistillModel',
     'LDDistillModel',
-    'DETRDistillModel',
     'PPYOLOEDistillModel',
-    'PPDINODistillModel',
-    'KDDETRDistillModel',
 ]
 
 
@@ -67,11 +63,11 @@ class DistillModel(nn.Layer):
         self.distill_cfg = slim_cfg
 
         # load pretrain weights
-        self.is_inherit = False # False
+        self.is_inherit = False
         if stu_pretrain:
             if self.is_inherit and tea_pretrain:
                 load_pretrain_weight(self.student_model, tea_pretrain)
-                logger.info(
+                logger.debug(
                     "Inheriting! loading teacher weights to student model!")
             load_pretrain_weight(self.student_model, stu_pretrain)
             logger.info("Student model has loaded pretrain weights!")
@@ -353,157 +349,4 @@ class PPYOLOEDistillModel(DistillModel):
             student_loss['feat_loss'] = feat_loss
             return student_loss
         else:
-            return self.student_model(inputs)
-
-
-@register
-class DETRDistillModel(DistillModel):
-    """
-    Build DETR distill model
-    Args:
-        cfg: The student config.
-        slim_cfg: The teacher and distill config.
-    """
-
-    def __init__(self, cfg, slim_cfg):
-        super(DETRDistillModel, self).__init__(cfg=cfg, slim_cfg=slim_cfg)
-        assert self.arch in ['DETR'], 'Unsupported arch: {}'.format(self.arch)
-
-    def forward(self, inputs):
-        if self.training:
-            with paddle.no_grad():
-                teacher_loss = self.teacher_model(inputs)
-
-            distill_pairs_t = self.teacher_model.transformer.distill_pairs
-            pos_query_dec_t, target_query_dec_t, out_bboxes_t, out_logits_t, dn_meta_t, attn_mask_t = [
-                distill_pairs_t.pop(k)
-                for k in [
-                    'tad_pos_query_dec', 'tad_target_query_dec',
-                    'tad_out_bboxes', 'tad_out_logits', 'tad_dn_meta',
-                    'tad_attn_mask'
-                ]
-            ]
-            inputs.update({
-                'tad_pos_query_dec': pos_query_dec_t,
-                'tad_target_query_dec': target_query_dec_t,
-                'tad_dn_meta': dn_meta_t,
-                'tad_attn_mask': attn_mask_t
-            })
-
-            student_loss = self.student_model(inputs)
-            distill_pairs_s = self.student_model.transformer.distill_pairs
-            out_bboxes_s, out_logits_s = [
-                distill_pairs_s.pop(k)
-                for k in ['tad_out_bboxes', 'tad_out_logits']
-            ]
-
-            distill_loss = self.distill_loss(
-                out_bboxes_s,
-                out_logits_s,
-                out_bboxes_t,
-                out_logits_t,
-                inputs['gt_bbox'],
-                inputs['gt_class'],
-                dn_meta=dn_meta_t)
-
-            student_loss.update(distill_loss)
-            det_loss = student_loss.pop('loss')
-            student_loss.update({
-                'loss': paddle.add_n(list(distill_loss.values())) + det_loss
-            })
-            return student_loss
-        else:
-            return self.student_model(inputs)
-
-
-@register
-class PPDINODistillModel(DistillModel):
-    """
-    Build DINO distill model.
-    Args:
-        cfg: The student config.
-        slim_cfg: The teacher and distill config.
-    """
-    def __init__(self, cfg, slim_cfg):
-        super(PPDINODistillModel, self).__init__(cfg=cfg, slim_cfg=slim_cfg)
-        assert self.arch in ['DETR'], 'Unsupported arch: {}'.format(self.arch)
-
-    def forward(self, inputs):
-        if self.training:
-            with paddle.no_grad(): 
-                # with paddle.amp.auto_cast(enable=True):
-                inputs['is_teacher'] = True
-                teacher_loss = self.teacher_model(inputs)
-
-            # if hasattr(self.teacher_model.transformer, "out_bboxes"):
-            #     self.student_model.transformer.out_bboxes, self.student_model.transformer.out_logits = \
-            #         self.teacher_model.transformer.out_bboxes, self.teacher_model.transformer.out_logits
-            #     delattr(self.teacher_model.transformer, "out_bboxes")
-            #     delattr(self.teacher_model.transformer, "out_logits")
-
-            inputs['is_teacher'] = False
-            student_loss = self.student_model(inputs)
-
-            logits_loss, feat_loss = self.distill_loss(self.teacher_model,
-                                                       self.student_model)
-            det_total_loss = student_loss['loss']
-            total_loss = det_total_loss + logits_loss + feat_loss
-            student_loss['loss'] = total_loss
-            student_loss['stu_loss'] = det_total_loss
-            student_loss['logits_loss'] = logits_loss
-            student_loss['feat_loss'] = feat_loss
-            student_loss['tea_loss'] = teacher_loss['loss'] # just print
-            return student_loss
-        else:
-            inputs['is_teacher'] = False
-            return self.student_model(inputs)
-
-
-#from IPython import embed
-@register
-class KDDETRDistillModel(DistillModel):
-    """
-    Build KD-DETR distill model, only used in DETR(DINO)
-    Args:
-        cfg: The student config.
-        slim_cfg: The teacher and distill config.
-    """
-
-    def __init__(self, cfg, slim_cfg):
-        super(KDDETRDistillModel, self).__init__(cfg=cfg, slim_cfg=slim_cfg)
-        assert self.arch in ['DETR'], 'Unsupported arch: {}'.format(
-            self.arch)
-
-    def forward(self, inputs):
-        with paddle.no_grad(): 
-            inputs['is_teacher'] = True
-            teacher_outs = self.teacher_model(inputs)
-
-        if self.training:
-            # with paddle.no_grad(): 
-            #     inputs['is_teacher'] = True
-            #     teacher_outs = self.teacher_model(inputs)
-            inputs['is_teacher'] = False
-            inputs['aux_refpoints'] = self.teacher_model.transformer.distill_pairs['refpoints']
-            student_loss = self.student_model(inputs)
-
-            # kd_loss = self.distill_loss(self.student_model, self.teacher_model)
-            losses = self.distill_loss(self.student_model, self.teacher_model)
-            kd_loss = sum(losses[k] * self.distill_loss.weight_dict[k] for k in losses.keys() if k in self.distill_loss.weight_dict)
-
-            det_total_loss = student_loss['loss']
-            total_loss = det_total_loss + kd_loss * 2
-            student_loss['loss'] = total_loss
-            student_loss['stu_loss'] = det_total_loss
-            student_loss['kd_loss'] = kd_loss
-            student_loss['tea_loss'] = teacher_outs['loss'] # just print
-
-            for k in losses.keys():
-                if k in self.distill_loss.weight_dict:
-                    sub_loss = losses[k] * self.distill_loss.weight_dict[k]
-                    student_loss[k] = sub_loss
-
-            return student_loss
-        else:
-            inputs['is_teacher'] = False
             return self.student_model(inputs)

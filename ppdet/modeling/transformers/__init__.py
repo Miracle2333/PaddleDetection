@@ -18,8 +18,10 @@ from . import matchers
 from . import position_encoding
 from . import deformable_transformer
 from . import dino_transformer
-from . import ppdetr_transformer
 from . import group_detr_transformer
+from . import mask_dino_transformer
+from . import ppdetr_transformer
+from . import hybrid_encoder
 
 from .detr_transformer import *
 from .utils import *
@@ -28,5 +30,7 @@ from .position_encoding import *
 from .deformable_transformer import *
 from .dino_transformer import *
 from .petr_transformer import *
-from .ppdetr_transformer import *
 from .group_detr_transformer import *
+from .mask_dino_transformer import *
+from .ppdetr_transformer import *
+from .hybrid_encoder import *

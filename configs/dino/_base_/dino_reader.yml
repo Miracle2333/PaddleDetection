@@ -2,7 +2,6 @@ worker_num: 4
 TrainReader:
   sample_transforms:
     - Decode: {}
-    #- DecodeCache: {cache_root: 'dataset/coco/cache/buffer'}
     - RandomFlip: {prob: 0.5}
     - RandomSelect: { transforms1: [ RandomShortSideResize: { short_side_sizes: [ 480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800 ], max_size: 1333 } ],
                       transforms2: [
@@ -29,8 +28,6 @@ EvalReader:
     - Resize: {target_size: [800, 1333], keep_ratio: True}
     - NormalizeImage: {is_scale: true, mean: [0.485, 0.456, 0.406], std: [0.229, 0.224, 0.225]}
     - Permute: {}
-  batch_transforms:
-    - PadMaskBatch: {pad_to_stride: -1, return_pad_mask: true}
   batch_size: 1
 
 
@@ -40,6 +37,4 @@ TestReader:
     - Resize: {target_size: [800, 1333], keep_ratio: True}
     - NormalizeImage: {is_scale: true, mean: [0.485, 0.456, 0.406], std: [0.229, 0.224, 0.225]}
     - Permute: {}
-  batch_transforms:
-    - PadMaskBatch: {pad_to_stride: -1, return_pad_mask: true}
   batch_size: 1

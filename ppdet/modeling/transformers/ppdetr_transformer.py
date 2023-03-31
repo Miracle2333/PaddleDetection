@@ -39,6 +39,76 @@ from .utils import (_get_clones, get_sine_pos_embed,
 __all__ = ['PPDETRTransformer']
 
 
+class PPMSDeformableAttention(MSDeformableAttention):
+    def forward(self,
+                query,
+                reference_points,
+                value,
+                value_spatial_shapes,
+                value_level_start_index,
+                value_mask=None):
+        """
+        Args:
+            query (Tensor): [bs, query_length, C]
+            reference_points (Tensor): [bs, query_length, n_levels, 2], range in [0, 1], top-left (0,0),
+                bottom-right (1, 1), including padding area
+            value (Tensor): [bs, value_length, C]
+            value_spatial_shapes (List): [n_levels, 2], [(H_0, W_0), (H_1, W_1), ..., (H_{L-1}, W_{L-1})]
+            value_level_start_index (List): [n_levels], [0, H_0*W_0, H_0*W_0+H_1*W_1, ...]
+            value_mask (Tensor): [bs, value_length], True for non-padding elements, False for padding elements
+
+        Returns:
+            output (Tensor): [bs, Length_{query}, C]
+        """
+        bs, Len_q = query.shape[:2]
+        Len_v = value.shape[1]
+
+        value = self.value_proj(value)
+        if value_mask is not None:
+            value_mask = value_mask.astype(value.dtype).unsqueeze(-1)
+            value *= value_mask
+        value = value.reshape([bs, Len_v, self.num_heads, self.head_dim])
+
+        sampling_offsets = self.sampling_offsets(query).reshape(
+            [bs, Len_q, self.num_heads, self.num_levels, self.num_points, 2])
+        attention_weights = self.attention_weights(query).reshape(
+            [bs, Len_q, self.num_heads, self.num_levels * self.num_points])
+        attention_weights = F.softmax(attention_weights).reshape(
+            [bs, Len_q, self.num_heads, self.num_levels, self.num_points])
+
+        if reference_points.shape[-1] == 2:
+            offset_normalizer = paddle.to_tensor(value_spatial_shapes)
+            offset_normalizer = offset_normalizer.flip([1]).reshape(
+                [1, 1, 1, self.num_levels, 1, 2])
+            sampling_locations = reference_points.reshape([
+                bs, Len_q, 1, self.num_levels, 1, 2
+            ]) + sampling_offsets / offset_normalizer
+        elif reference_points.shape[-1] == 4:
+            sampling_locations = (
+                reference_points[:, :, None, :, None, :2] + sampling_offsets /
+                self.num_points * reference_points[:, :, None, :, None, 2:] *
+                0.5)
+        else:
+            raise ValueError(
+                "Last dim of reference_points must be 2 or 4, but get {} instead.".
+                format(reference_points.shape[-1]))
+
+        if not isinstance(query, paddle.Tensor):
+            from ppdet.modeling.transformers.utils import deformable_attention_core_func
+            output = deformable_attention_core_func(
+                value, value_spatial_shapes, value_level_start_index,
+                sampling_locations, attention_weights)
+        else:
+            value_spatial_shapes = paddle.to_tensor(value_spatial_shapes)
+            value_level_start_index = paddle.to_tensor(value_level_start_index)
+            output = self.ms_deformable_attn_core(
+                value, value_spatial_shapes, value_level_start_index,
+                sampling_locations, attention_weights)
+        output = self.output_proj(output)
+
+        return output
+
+
 class TransformerDecoderLayer(nn.Layer):
     def __init__(self,
                  d_model=256,
@@ -61,8 +131,8 @@ class TransformerDecoderLayer(nn.Layer):
             bias_attr=ParamAttr(regularizer=L2Decay(0.0)))
 
         # cross attention
-        self.cross_attn = MSDeformableAttention(d_model, n_head, n_levels,
-                                                n_points, 1.0)
+        self.cross_attn = PPMSDeformableAttention(d_model, n_head, n_levels,
+                                                  n_points, 1.0)
         self.dropout2 = nn.Dropout(dropout)
         self.norm2 = nn.LayerNorm(
             d_model,
@@ -107,7 +177,10 @@ class TransformerDecoderLayer(nn.Layer):
         # self attention
         q = k = self.with_pos_embed(tgt, query_pos_embed)
         if attn_mask is not None:
-            attn_mask = attn_mask.astype('bool')
+            attn_mask = paddle.where(
+                attn_mask.astype('bool'),
+                paddle.zeros(attn_mask.shape, tgt.dtype),
+                paddle.full(attn_mask.shape, float("-inf"), tgt.dtype))
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=attn_mask)
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
@@ -128,12 +201,11 @@ class TransformerDecoderLayer(nn.Layer):
 
 
 class TransformerDecoder(nn.Layer):
-    def __init__(self, hidden_dim, decoder_layer, num_layers, for_distill=False):
+    def __init__(self, hidden_dim, decoder_layer, num_layers):
         super(TransformerDecoder, self).__init__()
         self.layers = _get_clones(decoder_layer, num_layers)
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.for_distill = for_distill
 
     def forward(self,
                 tgt,
@@ -149,20 +221,17 @@ class TransformerDecoder(nn.Layer):
         output = tgt
         dec_out_bboxes = []
         dec_out_logits = []
-        inter_feats, inter_ref_bboxes = [], []
-        ref_points = F.sigmoid(ref_points_unact)
+        ref_points_detach = F.sigmoid(ref_points_unact)
         for i, layer in enumerate(self.layers):
-            ref_points_input = ref_points.detach().unsqueeze(2)
-            query_pos_embed = get_sine_pos_embed(ref_points_input[..., 0, :],
-                                                 self.hidden_dim // 2)
-            query_pos_embed = query_pos_head(query_pos_embed)
+            ref_points_input = ref_points_detach.unsqueeze(2)
+            query_pos_embed = query_pos_head(ref_points_detach)
 
             output = layer(output, ref_points_input, memory,
                            memory_spatial_shapes, memory_level_start_index,
                            attn_mask, memory_mask, query_pos_embed)
 
             inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
-                ref_points).detach())
+                ref_points_detach))
 
             if self.training:
                 dec_out_logits.append(score_head[i](output))
@@ -172,32 +241,29 @@ class TransformerDecoder(nn.Layer):
                     dec_out_bboxes.append(
                         F.sigmoid(bbox_head[i](output) + inverse_sigmoid(
                             ref_points)))
-            else:
-                if i == len(self.layers) - 1:
-                    dec_out_bboxes.append(inter_ref_bbox)
-                    dec_out_logits.append(score_head[i](output))
+            elif i == len(self.layers) - 1:
+                dec_out_logits.append(score_head[i](output))
+                dec_out_bboxes.append(inter_ref_bbox)
 
             ref_points = inter_ref_bbox
+            ref_points_detach = inter_ref_bbox.detach(
+            ) if self.training else inter_ref_bbox
 
-            inter_feats.append(output)
-            inter_ref_bboxes.append(ref_points)
-
-        return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits), inter_feats, inter_ref_bboxes
+        return paddle.stack(dec_out_bboxes), paddle.stack(dec_out_logits)
 
 
-#from IPython import embed
 @register
 class PPDETRTransformer(nn.Layer):
-    __shared__ = ['num_classes', 'hidden_dim', 'eval_size', 'for_distill']
+    __shared__ = ['num_classes', 'hidden_dim', 'eval_size']
 
     def __init__(self,
                  num_classes=80,
                  hidden_dim=256,
-                 num_queries=900,
+                 num_queries=300,
                  position_embed_type='sine',
                  backbone_feat_channels=[512, 1024, 2048],
                  feat_strides=[8, 16, 32],
-                 num_levels=4,
+                 num_levels=3,
                  num_decoder_points=4,
                  nhead=8,
                  num_decoder_layers=6,
@@ -208,7 +274,6 @@ class PPDETRTransformer(nn.Layer):
                  label_noise_ratio=0.5,
                  box_noise_scale=1.0,
                  learnt_init_query=True,
-                 for_distill=False,
                  eval_size=None,
                  eps=1e-2):
         super(PPDETRTransformer, self).__init__()
@@ -237,7 +302,7 @@ class PPDETRTransformer(nn.Layer):
             hidden_dim, nhead, dim_feedforward, dropout, activation, num_levels,
             num_decoder_points)
         self.decoder = TransformerDecoder(hidden_dim, decoder_layer,
-                                          num_decoder_layers, for_distill)
+                                          num_decoder_layers)
 
         # denoising part
         self.denoising_class_embed = nn.Embedding(
@@ -252,10 +317,7 @@ class PPDETRTransformer(nn.Layer):
         self.learnt_init_query = learnt_init_query
         if learnt_init_query:
             self.tgt_embed = nn.Embedding(num_queries, hidden_dim)
-        self.query_pos_head = MLP(2 * hidden_dim,
-                                  hidden_dim,
-                                  hidden_dim,
-                                  num_layers=2)
+        self.query_pos_head = MLP(4, 2 * hidden_dim, hidden_dim, num_layers=2)
 
         # encoder head
         self.enc_output = nn.Sequential(
@@ -276,11 +338,6 @@ class PPDETRTransformer(nn.Layer):
             MLP(hidden_dim, hidden_dim, 4, num_layers=3)
             for _ in range(num_decoder_layers)
         ])
-
-        # detr distill
-        self.for_distill = for_distill
-        if for_distill:
-            self.distill_pairs = dict()
 
         self._reset_parameters()
 
@@ -354,49 +411,31 @@ class PPDETRTransformer(nn.Layer):
                 else:
                     proj_feats.append(self.input_proj[i](proj_feats[-1]))
 
-        if self.for_distill:
-            self.distill_pairs['neck_feats'] = feats
-            self.distill_pairs['proj_feats'] = proj_feats
-
         # get encoder inputs
         feat_flatten = []
         spatial_shapes = []
+        level_start_index = [0, ]
         for i, feat in enumerate(proj_feats):
-            _, _, h, w = paddle.shape(feat)
-            spatial_shapes.append(paddle.concat([h, w]))
-            # [b,c,h,w] -> [b,h*w,c]
+            _, _, h, w = feat.shape
+            # [b, c, h, w] -> [b, h*w, c]
             feat_flatten.append(feat.flatten(2).transpose([0, 2, 1]))
+            # [num_levels, 2]
+            spatial_shapes.append([h, w])
+            # [l], start index of each level
+            level_start_index.append(h * w + level_start_index[-1])
 
         # [b, l, c]
         feat_flatten = paddle.concat(feat_flatten, 1)
-        # [num_levels, 2]
-        spatial_shapes = paddle.to_tensor(
-            paddle.stack(spatial_shapes).astype('int64'))
-        # [l], 每一个level的起始index
-        level_start_index = paddle.concat([
-            paddle.zeros(
-                [1], dtype='int64'), spatial_shapes.prod(1).cumsum(0)[:-1]
-        ])
+        level_start_index.pop()
         return (feat_flatten, spatial_shapes, level_start_index)
 
     def forward(self, feats, pad_mask=None, gt_meta=None):
-        # feats: [2, 512, 80, 80] [2, 512, 40, 40] [2, 512, 20, 20]
-        if self.for_distill:
-            aux_refpoints = gt_meta.get('aux_refpoints', None)
-
         # input projection and embedding
         (memory, spatial_shapes,
          level_start_index) = self._get_encoder_input(feats)
-        # memory.shape [1, 8400, 256]
-
-        if self.for_distill:
-            self.distill_pairs['feat_flatten'] = memory
-            self.distill_pairs['spatial_shapes'] = spatial_shapes
-            self.distill_pairs['level_start_index'] = level_start_index
 
         # prepare denoising training
-        is_teacher = gt_meta.get('is_teacher', False)
-        if self.training and not is_teacher:
+        if self.training:
             denoising_class, denoising_bbox_unact, attn_mask, dn_meta = \
                 get_contrastive_denoising_training_group(gt_meta,
                                             self.num_classes,
@@ -408,14 +447,12 @@ class PPDETRTransformer(nn.Layer):
         else:
             denoising_class, denoising_bbox_unact, attn_mask, dn_meta = None, None, None, None
 
-        target, init_ref_points_unact, enc_topk_bboxes, enc_topk_logits, \
-        enc_outputs_class, enc_outputs_coord_unact, enc_output_memory = \
+        target, init_ref_points_unact, enc_topk_bboxes, enc_topk_logits = \
             self._get_decoder_input(
             memory, spatial_shapes, denoising_class, denoising_bbox_unact)
-        # [2, 300, 256] [2, 300, 4] [2, 300, 4] [2, 300, 80]
 
         # decoder
-        out_bboxes, out_logits, inter_feats, inter_ref_bboxes = self.decoder(
+        out_bboxes, out_logits = self.decoder(
             target,
             init_ref_points_unact,
             memory,
@@ -425,62 +462,6 @@ class PPDETRTransformer(nn.Layer):
             self.dec_score_head,
             self.query_pos_head,
             attn_mask=attn_mask)
-
-        if self.for_distill and aux_refpoints is not None:
-            # tgt_embed, refpoint_embed, attn_mask = aux_refpoints from teacher
-            # target, init_ref_points_unact, attn_mask = aux_refpoints from teacher
-            out_bboxes_aux, out_logits_aux, inter_feats_aux, inter_ref_bboxes_aux = self.decoder(
-                aux_refpoints[0],
-                aux_refpoints[1],
-                memory,
-                spatial_shapes,
-                level_start_index,
-                self.dec_bbox_head,
-                self.dec_score_head,
-                self.query_pos_head,
-                attn_mask=aux_refpoints[2])
-        else:
-            inter_feats_aux = None
-            inter_ref_bboxes_aux = None
-
-        if self.for_distill:
-            if dn_meta:
-                # student
-                _, dec_out_bboxes = paddle.split(out_bboxes, dn_meta['dn_num_split'], axis=2)
-                _, dec_out_logits = paddle.split(out_logits, dn_meta['dn_num_split'], axis=2)
-                self.distill_pairs['out_bboxes_kd'] = dec_out_bboxes
-                self.distill_pairs['out_logits_kd'] = dec_out_logits
-                # _, dec_target = paddle.split(target, dn_meta['dn_num_split'], axis=1)
-                # self.distill_pairs['proj_queries'] = dec_target
-            else:
-                # teacher
-                self.distill_pairs['out_bboxes_kd'] = out_bboxes
-                self.distill_pairs['out_logits_kd'] = out_logits
-                #self.distill_pairs['proj_queries'] = target
-
-        if self.for_distill:
-            self.distill_pairs['enc_class'] = enc_outputs_class
-            self.distill_pairs['enc_coord'] = enc_outputs_coord_unact
-            self.distill_pairs['enc_memory'] = enc_output_memory
-
-            self.distill_pairs['hs'] = paddle.stack(inter_feats)
-            self.distill_pairs['reference'] = paddle.stack(inter_ref_bboxes)
-            self.distill_pairs['pred_logits'] = out_logits[-1]
-            self.distill_pairs['pred_boxes'] = out_bboxes[-1]
-
-            if inter_feats_aux is not None:
-                self.distill_pairs['aux_hs'] = paddle.stack(inter_feats_aux)
-                self.distill_pairs['aux_reference'] = paddle.stack(inter_ref_bboxes_aux)
-                self.distill_pairs['aux_pred_logits'] = out_logits_aux[-1]
-                self.distill_pairs['aux_pred_boxes'] = out_bboxes_aux[-1]
-                self.distill_pairs['auxrf_aux_outputs'] = {}
-                self.distill_pairs['auxrf_aux_outputs']['pred_logits'] = out_logits_aux[:-1]
-                self.distill_pairs['auxrf_aux_outputs']['pred_boxes'] = out_bboxes_aux[:-1]
-
-            self.distill_pairs['dn_meta'] = dn_meta
-            self.distill_pairs['refpoints'] = (target.detach(), init_ref_points_unact.detach(), attn_mask)
-
-        # [1, 2, 300, 4] [1, 2, 300, 80]
         return (out_bboxes, out_logits, enc_topk_bboxes, enc_topk_logits,
                 dn_meta)
 
@@ -490,8 +471,7 @@ class PPDETRTransformer(nn.Layer):
                           dtype="float32"):
         if spatial_shapes is None:
             spatial_shapes = [
-                paddle.to_tensor(
-                    [int(self.eval_size[0] / s), int(self.eval_size[1] / s)])
+                [int(self.eval_size[0] / s), int(self.eval_size[1] / s)]
                 for s in self.feat_strides
             ]
         anchors = []
@@ -503,7 +483,7 @@ class PPDETRTransformer(nn.Layer):
                     end=w, dtype=dtype))
             grid_xy = paddle.stack([grid_x, grid_y], -1)
 
-            valid_WH = paddle.concat([h, w]).astype(dtype)
+            valid_WH = paddle.to_tensor([h, w]).astype(dtype)
             grid_xy = (grid_xy.unsqueeze(0) + 0.5) / valid_WH
             wh = paddle.ones_like(grid_xy) * grid_size * (2.0**lvl)
             anchors.append(
@@ -529,10 +509,7 @@ class PPDETRTransformer(nn.Layer):
         else:
             anchors, valid_mask = self.anchors, self.valid_mask
         memory = paddle.where(valid_mask, memory, paddle.to_tensor(0.))
-        # output_memory = self.enc_output(memory)
-
-        enc_output_memory = self.enc_output[0](memory) # before bn
-        output_memory = self.enc_output[1](enc_output_memory)
+        output_memory = self.enc_output(memory)
 
         enc_outputs_class = self.enc_score_head(output_memory)
         enc_outputs_coord_unact = self.enc_bbox_head(output_memory) + anchors
@@ -550,18 +527,18 @@ class PPDETRTransformer(nn.Layer):
         if denoising_bbox_unact is not None:
             reference_points_unact = paddle.concat(
                 [denoising_bbox_unact, reference_points_unact], 1)
+        if self.training:
+            reference_points_unact = reference_points_unact.detach()
         enc_topk_logits = paddle.gather_nd(enc_outputs_class, topk_ind)
 
         # extract region features
         if self.learnt_init_query:
             target = self.tgt_embed.weight.unsqueeze(0).tile([bs, 1, 1])
         else:
-            target = paddle.gather_nd(output_memory, topk_ind).detach()
+            target = paddle.gather_nd(output_memory, topk_ind)
+            if self.training:
+                target = target.detach()
         if denoising_class is not None:
             target = paddle.concat([denoising_class, target], 1)
 
-        if self.for_distill:
-            self.distill_pairs['proj_queries'] = paddle.gather_nd(output_memory, topk_ind).detach()
-
-        return target, reference_points_unact.detach(), enc_topk_bboxes, enc_topk_logits, \
-                enc_outputs_class, enc_outputs_coord_unact, enc_output_memory
+        return target, reference_points_unact, enc_topk_bboxes, enc_topk_logits

@@ -24,7 +24,7 @@ import pycocotools.mask as mask_util
 from ..initializer import linear_init_, constant_
 from ..transformers.utils import inverse_sigmoid
 
-__all__ = ['DETRHead', 'DeformableDETRHead', 'DINOHead']
+__all__ = ['DETRHead', 'DeformableDETRHead', 'DINOHead', 'MaskDINOHead']
 
 
 class MLP(nn.Layer):
@@ -357,29 +357,9 @@ class DeformableDETRHead(nn.Layer):
         if self.training:
             assert inputs is not None
             assert 'gt_bbox' in inputs and 'gt_class' in inputs
-            total_loss = self.loss(outputs_bbox, outputs_logit,
-                                   inputs['gt_bbox'], inputs['gt_class'])
-            if inputs.get('proposal_bbox', None) is not None:
-                proposal_bbox, proposal_class, proposal_score = inputs[
-                    'proposal_bbox'], inputs['proposal_class'], inputs[
-                        'proposal_score']
-                for i in range(len(proposal_bbox[0])):
-                    extra_loss = self.loss(
-                        outputs_bbox,
-                        outputs_logit, [
-                            proposal_bbox_per_img[i]
-                            for proposal_bbox_per_img in proposal_bbox
-                        ], [
-                            proposal_class_per_img[i]
-                            for proposal_class_per_img in proposal_class
-                        ],
-                        gt_score=[
-                            proposal_score_per_img[i]
-                            for proposal_score_per_img in proposal_score
-                        ],
-                        postfix=f'_proposal_{i}')
-                    total_loss.update(extra_loss)
-            return total_loss
+
+            return self.loss(outputs_bbox, outputs_logit, inputs['gt_bbox'],
+                             inputs['gt_class'])
         else:
             return (outputs_bbox[-1], outputs_logit[-1], None)
 
@@ -475,12 +455,81 @@ class DINOHead(nn.Layer):
                 out_logits,
                 inputs['gt_bbox'],
                 inputs['gt_class'],
-                proposal_bbox=inputs.get('proposal_bbox', None),
-                proposal_class=inputs.get('proposal_class', None),
-                proposal_score=inputs.get('proposal_score', None),
                 dn_out_bboxes=dn_out_bboxes,
                 dn_out_logits=dn_out_logits,
                 dn_meta=dn_meta)
         else:
             return (dec_out_bboxes[self.eval_idx],
                     dec_out_logits[self.eval_idx], None)
+
+
+@register
+class MaskDINOHead(nn.Layer):
+    __inject__ = ['loss']
+
+    def __init__(self, loss='DINOLoss'):
+        super(MaskDINOHead, self).__init__()
+        self.loss = loss
+
+    def forward(self, out_transformer, body_feats, inputs=None):
+        (dec_out_logits, dec_out_bboxes, dec_out_masks, enc_out, init_out,
+         dn_meta) = out_transformer
+        if self.training:
+            assert inputs is not None
+            assert 'gt_bbox' in inputs and 'gt_class' in inputs
+            assert 'gt_segm' in inputs
+
+            if dn_meta is not None:
+                dn_out_logits, dec_out_logits = paddle.split(
+                    dec_out_logits, dn_meta['dn_num_split'], axis=2)
+                dn_out_bboxes, dec_out_bboxes = paddle.split(
+                    dec_out_bboxes, dn_meta['dn_num_split'], axis=2)
+                dn_out_masks, dec_out_masks = paddle.split(
+                    dec_out_masks, dn_meta['dn_num_split'], axis=2)
+                if init_out is not None:
+                    init_out_logits, init_out_bboxes, init_out_masks = init_out
+                    init_out_logits_dn, init_out_logits = paddle.split(
+                        init_out_logits, dn_meta['dn_num_split'], axis=1)
+                    init_out_bboxes_dn, init_out_bboxes = paddle.split(
+                        init_out_bboxes, dn_meta['dn_num_split'], axis=1)
+                    init_out_masks_dn, init_out_masks = paddle.split(
+                        init_out_masks, dn_meta['dn_num_split'], axis=1)
+
+                    dec_out_logits = paddle.concat(
+                        [init_out_logits.unsqueeze(0), dec_out_logits])
+                    dec_out_bboxes = paddle.concat(
+                        [init_out_bboxes.unsqueeze(0), dec_out_bboxes])
+                    dec_out_masks = paddle.concat(
+                        [init_out_masks.unsqueeze(0), dec_out_masks])
+
+                    dn_out_logits = paddle.concat(
+                        [init_out_logits_dn.unsqueeze(0), dn_out_logits])
+                    dn_out_bboxes = paddle.concat(
+                        [init_out_bboxes_dn.unsqueeze(0), dn_out_bboxes])
+                    dn_out_masks = paddle.concat(
+                        [init_out_masks_dn.unsqueeze(0), dn_out_masks])
+            else:
+                dn_out_bboxes, dn_out_logits = None, None
+                dn_out_masks = None
+
+            enc_out_logits, enc_out_bboxes, enc_out_masks = enc_out
+            out_logits = paddle.concat(
+                [enc_out_logits.unsqueeze(0), dec_out_logits])
+            out_bboxes = paddle.concat(
+                [enc_out_bboxes.unsqueeze(0), dec_out_bboxes])
+            out_masks = paddle.concat(
+                [enc_out_masks.unsqueeze(0), dec_out_masks])
+
+            return self.loss(
+                out_bboxes,
+                out_logits,
+                inputs['gt_bbox'],
+                inputs['gt_class'],
+                masks=out_masks,
+                gt_mask=inputs['gt_segm'],
+                dn_out_logits=dn_out_logits,
+                dn_out_bboxes=dn_out_bboxes,
+                dn_out_masks=dn_out_masks,
+                dn_meta=dn_meta)
+        else:
+            return (dec_out_bboxes[-1], dec_out_logits[-1], dec_out_masks[-1])
