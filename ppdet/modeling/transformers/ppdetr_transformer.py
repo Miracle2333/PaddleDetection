@@ -231,7 +231,8 @@ class TransformerDecoder(nn.Layer):
             query_pos_embed = get_sine_pos_embed(ref_points_input[..., 0, :],
                                                  self.hidden_dim // 2)
             #query_pos_embed = query_pos_head(query_pos_embed)
-            query_pos_embed = query_pos_head(inverse_sigmoid(ref_points))
+            #query_pos_embed = query_pos_head(inverse_sigmoid(ref_points))
+            query_pos_embed = query_pos_head(ref_points)
 
             output = layer(output, ref_points_input, memory,
                            memory_spatial_shapes, memory_level_start_index,
@@ -272,7 +273,7 @@ class PPDETRTransformer(nn.Layer):
                  position_embed_type='sine',
                  backbone_feat_channels=[512, 1024, 2048],
                  feat_strides=[8, 16, 32],
-                 num_levels=4,
+                 num_levels=3,
                  num_decoder_points=4,
                  nhead=8,
                  num_decoder_layers=6,
@@ -327,8 +328,7 @@ class PPDETRTransformer(nn.Layer):
         self.learnt_init_query = learnt_init_query
         if learnt_init_query:
             self.tgt_embed = nn.Embedding(num_queries, hidden_dim)
-        self.query_pos_head = MLP(2 * hidden_dim,
-                                  hidden_dim,
+        self.query_pos_head = MLP(4, 2 * hidden_dim,
                                   hidden_dim,
                                   num_layers=2)
 

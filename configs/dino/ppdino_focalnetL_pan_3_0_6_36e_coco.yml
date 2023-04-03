@@ -2,7 +2,7 @@ _BASE_: [
   '../datasets/coco_detection.yml',
   '../runtime.yml',
   #'_base_/optimizer_60e.yml',
-  '_base_/optimizer_36e_drop.yml',
+  '_base_/optimizer_1x.yml',
   '_base_/dino_r50vd_pan.yml',
   '_base_/yoloe_reader.yml',
 ]
@@ -31,12 +31,28 @@ FocalNet:
 HybridEncoder:
   hidden_dim: 256
   use_encoder_idx: [2]
-  num_encoder_layers: 6 #1
+  num_encoder_layers: 1 #1
   encoder_layer:
     name: TransformerLayer
     d_model: 256
     nhead: 8
-    dim_feedforward: 2048 #1024
+    dim_feedforward: 1024 #1024
     dropout: 0.
     activation: 'gelu'
   expansion: 1.0
+
+
+PPDETRTransformer:
+  num_queries: 300
+  position_embed_type: sine
+  feat_strides: [8, 16, 32]
+  num_levels: 3
+  nhead: 8
+  num_decoder_layers: 6
+  dim_feedforward: 1024 #1024
+  dropout: 0.0
+  activation: relu
+  num_denoising: 100
+  label_noise_ratio: 0.5
+  box_noise_scale: 1.0
+  learnt_init_query: False
