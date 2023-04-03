@@ -1,4 +1,4 @@
-log_iter: 20
+log_iter: 175
 snapshot_epoch: 1
 
 for_distill: True

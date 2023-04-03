@@ -1,5 +1,5 @@
 export FLAGS_allocator_strategy=auto_growth
-job_name=distill_stu_ppdino_r50vd_12e
+job_name=distill_stu_ppdino_swin_r50vd_12e
 
 config=configs/dino/ppdino_distill/distill_stu_ppdino_r50vd_12e.yml
 tea_config=configs/dino/ppdino_distill/distill_tea_ppdino_swin_to_r50vd_12e.yml
