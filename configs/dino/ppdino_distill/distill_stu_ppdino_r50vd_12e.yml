@@ -10,7 +10,7 @@ weights: output/dino_r50vd_pan_3_0_6_1x_coco/model_final
 find_unused_parameters: True
 log_iter: 175
 snapshot_epoch: 1
-save_dir: ./output/kd_detr_swin_r50
+save_dir: ./output/kd_detr_focal_r50
 
 
 pretrain_weights: https://paddledet.bj.bcebos.com/models/pretrained/ResNet50_vd_ssld_v2_pretrained.pdparams
