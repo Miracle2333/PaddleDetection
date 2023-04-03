@@ -61,11 +61,9 @@ DINOHead:
     name: DINOLoss
     loss_coeff: {class: 1, bbox: 5, giou: 2}
     aux_loss: True
-    use_vfl: True
-    # use_same_match: True
-    # same_match_ind: 0
-    use_uni_match: True
-    uni_match_ind: 0
+    use_vfl: True 
+    #use_uni_match: True
+    #uni_match_ind: 0
     matcher:
       name: HungarianMatcher
       matcher_coeff: {class: 2, bbox: 5, giou: 2}
