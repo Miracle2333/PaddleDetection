@@ -321,3 +321,4 @@ def save_semi_model(
     state_dict['last_iter'] = last_iter
     paddle.save(state_dict, save_path + str(last_epoch)+"epoch.pdopt")
     logger.info("Save checkpoint: {}".format(save_dir))
+#experiment
