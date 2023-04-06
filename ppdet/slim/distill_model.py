@@ -483,27 +483,33 @@ class KDDETRDistillModel(DistillModel):
             # with paddle.no_grad(): 
             #     inputs['is_teacher'] = True
             #     teacher_outs = self.teacher_model(inputs)
-            inputs['is_teacher'] = False
-            inputs['aux_refpoints'] = self.teacher_model.transformer.distill_pairs['refpoints']
-            student_loss = self.student_model(inputs)
+            
 
-            # kd_loss = self.distill_loss(self.student_model, self.teacher_model)
-            losses = self.distill_loss(self.student_model, self.teacher_model)
-            kd_loss = sum(losses[k] * self.distill_loss.weight_dict[k] for k in losses.keys() if k in self.distill_loss.weight_dict)
+            if self.distill_loss is not None:
+                inputs['is_teacher'] = False
+                inputs['aux_refpoints'] = self.teacher_model.transformer.distill_pairs['refpoints']
+                student_loss = self.student_model(inputs)
+                # kd_loss = self.distill_loss(self.student_model, self.teacher_model)
+                losses = self.distill_loss(self.student_model, self.teacher_model)
+                kd_loss = sum(losses[k] * self.distill_loss.weight_dict[k] for k in losses.keys() if k in self.distill_loss.weight_dict)
 
-            det_total_loss = student_loss['loss']
-            total_loss = det_total_loss + kd_loss * 2
-            student_loss['loss'] = total_loss
-            student_loss['stu_loss'] = det_total_loss
-            student_loss['kd_loss'] = kd_loss
-            student_loss['tea_loss'] = teacher_outs['loss'] # just print
+                det_total_loss = student_loss['loss']
+                total_loss = det_total_loss + kd_loss * 2
+                student_loss['loss'] = total_loss
+                student_loss['stu_loss'] = det_total_loss
+                student_loss['kd_loss'] = kd_loss
+                student_loss['tea_loss'] = teacher_outs['loss'] # just print
 
-            for k in losses.keys():
-                if k in self.distill_loss.weight_dict:
-                    sub_loss = losses[k] * self.distill_loss.weight_dict[k]
-                    student_loss[k] = sub_loss
+                for k in losses.keys():
+                    if k in self.distill_loss.weight_dict:
+                        sub_loss = losses[k] * self.distill_loss.weight_dict[k]
+                        student_loss[k] = sub_loss
 
-            return student_loss
+                return student_loss
+            else:
+                inputs['is_teacher'] = False
+                student_loss = self.student_model(inputs)
+                return student_loss
         else:
             inputs['is_teacher'] = False
             return self.student_model(inputs)
