@@ -105,7 +105,7 @@ class DETR_SSOD(MultiSteamDetector):
             if  'gt_bbox' in data_unsup_w.keys():
                 del data_unsup_w['gt_bbox']    
             for k, v in data_sup_s.items():
-                if k in ['epoch_id']:
+                if k in ['epoch_id','curr_iter','im_id']:
                     continue
                 elif k in ['gt_class','gt_bbox','is_crowd']:
                     data_sup_s[k].extend(data_sup_w[k])

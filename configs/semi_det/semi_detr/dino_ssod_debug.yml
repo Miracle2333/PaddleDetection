@@ -77,8 +77,8 @@ TestReader:
   drop_last: false
 
 
-pretrain_student_weights: sup010_mAP424.pdparams
-pretrain_teacher_weights: sup010_mAP424.pdparams
+pretrain_student_weights: sup005_391.pdparams
+pretrain_teacher_weights: sup005_391.pdparams
 # pretrain_weights: pp-dino_sup005_390.pdparams
 hidden_dim: 256
 use_focal_loss: True
@@ -141,6 +141,7 @@ DINOHead:
     matcher:
       name: HungarianMatcher
       matcher_coeff: {class: 2, bbox: 5, giou: 2}
+    use_uni_match: True
 
 DETRPostProcess:
   num_top_queries: 300
@@ -174,14 +175,14 @@ num_classes: 80
 TrainDataset:
   !SemiCOCODataSet
     image_dir: train2017
-    anno_path: semi_annotations/instances_train2017.1@10.json
+    anno_path: semi_annotations/instances_train2017.1@5.json
     dataset_dir: dataset/coco
     data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
 # partial unlabeled COCO, use `SemiCOCODataSet` rather than `COCODataSet`
 UnsupTrainDataset:
   !SemiCOCODataSet
     image_dir: train2017
-    anno_path: semi_annotations/instances_train2017.1@10-unlabeled.json
+    anno_path: semi_annotations/instances_train2017.1@5-unlabeled.json
     dataset_dir: dataset/coco
     data_fields: ['image']
     supervised: False
@@ -198,7 +199,7 @@ TestDataset:
     anno_path: annotations/instances_val2017.json # also support txt (like VOC's label_list.txt)
     dataset_dir: dataset/coco # if set, anno_path will be 'dataset_dir/anno_path'
 
-epoch: 180 #epoch: 60
+epoch: 500 #epoch: 60
 
 LearningRate:
   base_lr: 0.0002
